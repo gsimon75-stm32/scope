@@ -19,7 +19,7 @@ define({ST7789_ROWS},           18)
 define({ST7789_MAXX},           128)
 define({ST7789_MAXY},           heval(6 * ST7789_ROWS))
 
-define({ST7789_CASET_BASE},     2)
+define({ST7789_CASET_BASE},     1)
 define({ST7789_RASET_BASE},     2)
 
 // --------------------------------------------------------------------------
@@ -80,7 +80,7 @@ FUNCTION(st7789_setup)
     ldr r0, LOC({SPI2_BASE})
     // NOTE: SPI clock is set to clk/2 = 36 MHz, the specified maximum for ST7789 is 33.3 MHz.
     // This seems to work, but if there are troubles, set it back to 18 MHz.
-    mov r1, heval((1 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
+    mov r1, heval((7 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
     str r1, [r0, SPI_CR1]
 
     mov r1, heval(SPI_CR2_SSOE) // + SPI_CR2_TXEIE) // + SPI_CR2_TXDMAEN)
@@ -156,10 +156,19 @@ ENDFUNC // st7789_wait_msec
 FUNCTION(st7789_initialise)
     push {{lr}}
 
+    /* The device is an ST7735, with the resolution select pins wired to GM[2:0]=000
+       so the frame memory is 132x162 pixels.
+
+       Row 0 is off screen, then come 128 visible rows (1..128), and then rows 129..161
+       are again off screen.
+
+       Each row contains 132 pixels, pixels 0..127 are visible, pixels 128..131 are off screen.
+     */
+
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_MADCTL)
     ST7789_MODE(1)
-    ST7789_SEND(0x00)
+    ST7789_SEND(0x00)   // no x-y tweaks
     ST7789_MODE(0)
     
     ST7789_SEND(ST7789_CMD_SWRESET)
@@ -170,72 +179,37 @@ FUNCTION(st7789_initialise)
     mov r0, 5
     bl st7789_wait_msec
 
-    // clear device memory: full area, 12bpp
-    ST7789_SEND(ST7789_CMD_COLMOD)
-    ST7789_MODE(1)
-    ST7789_SEND(0x03)
-    ST7789_MODE(0)
-
-/*
-    ST7789_SEND(ST7789_CMD_RAMWR)
-    ST7789_MODE(1)
-
-    mov r0, 0
-    mov r1, 0x192
-  LOC(CLRMEM0):
-    bl st7789_send
-    subs r1, 1
-    bne LOC(CLRMEM0)
-
-    mov r0, 0xff
-    bl st7789_send
-
-    mov r0, 0
-    mov r1, 0x80
-  LOC(CLRMEM1):
-    bl st7789_send
-    subs r1, 1
-    bne LOC(CLRMEM1)
-
-    //mov r0, 0xff
-    //bl st7789_send
-    //bl st7789_send
-
-    mov r0, 0
-    mov r1, 0x1000
-  LOC(CLRMEM2):
-    bl st7789_send
-    bl st7789_send
-    subs r1, 1
-    bne LOC(CLRMEM2)
-  LOC(ASDF):
-    b LOC(ASDF)
-
-    */
-
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_DISPON)
 
+    // clear device memory
     ST7789_SEND(ST7789_CMD_COLMOD)
     ST7789_MODE(1)
-    ST7789_SEND(0x05)
+    ST7789_SEND(0x03)   // 12bpp
     ST7789_MODE(0)
 
-    // ok: madctl=0x08, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x01..0x80: origo at lower left, x=horiz
-    // ok: madctl=0x28, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower left, x=vert
-    // ok: madctl=0xa8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
-    // ok: madctl=0x68, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower right, x=vert
-    // ok: madctl=0xc8, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x03..0x82: origo at upper left, x=horiz
-    // ok: madctl=0xe8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
-    // for writing characters column by column, we need madctl=0xe8, caset=y, raset=x
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    mov r0, 0
+    mov r1, 0x7d4c  // 132 * 162 * 1.5 
+  LOC(CLRMEM):
+    bl st7789_send
+    subs r1, 1
+    bne LOC(CLRMEM)
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_COLMOD)
+    ST7789_MODE(1)
+    ST7789_SEND(0x05)   // 16bpp
+    ST7789_MODE(0)
 
     ST7789_SEND(ST7789_CMD_MADCTL)
     ST7789_MODE(1)
-    ST7789_SEND(0x28)
+    ST7789_SEND(0x28)   // row-column swap, rgb-bgr swap
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLAR)
     ST7789_MODE(1)
-    ST7789_SEND(0, 0, 0, 0x7f)
+    ST7789_SEND(0, 0, 0, 0x80)  // visible panel area, NOTE: not ST7789_MAXY, because the 'not displayed' area is white...
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLON)
     ST7789_SEND(ST7789_CMD_CASET)
@@ -250,6 +224,7 @@ FUNCTION(st7789_initialise)
     ST7789_SEND(ST7789_CMD_RAMWR)
     ST7789_MODE(1)
     
+    // NOTE: row-column swap is active, so x is the outer loop
     mov r8, 0       // x
   LOC(LOOP_Y):
     mov r7, 0       // y

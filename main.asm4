@@ -176,6 +176,7 @@ ENDFUNC // tim2_setup
 
 
 FUNCTION(test_screen)
+    push {{r0-r2, lr}}
     ldr r0, LOC({X})
     mov r1, 'A'
     strh r1, [r0]
@@ -226,6 +227,8 @@ FUNCTION(test_screen)
 
     mov r2, 0   // clear wait counter
     b LOC(QWER)
+
+    pop {{r0-r2, pc}}
     
   LOC(YADDA):               .string "Yadda Boo"
   .align 4
@@ -275,7 +278,7 @@ FUNCTION(main)
     bl st7789_setup
     bl st7789_initialise
 
-    b test_screen // doesn't return
+    bl test_screen // doesn't return
 
     ldr rADC, LOC({ADC1_BASE})
     ldr rDMA, LOC({DMA1_BASE})
@@ -594,9 +597,8 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
 
   LOC(EVENT_1):
     push {{r0}}
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_SWRESET)
-    ST7789_MODE(0)
+    adr r0, LOC(WHAT)
+    bl puts
     pop {{r0}}
     b LOC(DONE)
   
@@ -632,6 +634,8 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
   LOC(NUM_SAMPLES):         .word num_samples
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({TIM2_BASE}):         .word TIM2_BASE
+  LOC(WHAT):                .string "what?"
+  .align(4)
 ENDFUNC // usb_ep1_rx_notify
 
 
