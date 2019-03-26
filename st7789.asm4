@@ -65,7 +65,7 @@ FUNCTION(st7789_setup)
     ldr r0, LOC({SPI2_BASE})
     // NOTE: SPI clock is set to clk/2 = 36 MHz, the specified maximum for ST7789 is 33.3 MHz.
     // This seems to work, but if there are troubles, set it back to 18 MHz.
-    mov r1, heval(SPI_CR1_BIDIOE + (0 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
+    mov r1, heval((1 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
     str r1, [r0, SPI_CR1]
 
     mov r1, heval(SPI_CR2_SSOE) // + SPI_CR2_TXEIE) // + SPI_CR2_TXDMAEN)
@@ -86,25 +86,16 @@ FUNCTION(st7789_setup)
 ENDFUNC // st7789_setup
 
 
-FUNCTION(SPI1_Handler)
-    push {{r0, r1, lr}}
-    //ldr r0, LOC({SPI1_BASE})
-    pop {{r0, r1, pc}}
-
-  LOC({SPI1_BASE}):         .word SPI1_BASE
-ENDFUNC // SPI1_Handler
-
-
 FUNCTION(st7789_send)
     // In: r0 = data to send
     push {{r1, r2, lr}}
     ldr r1, LOC({SPI2_BASE})
   LOC(WAIT_TX_EMPTY):
-    ldr r2, [r1, SPI_SR]
+    ldrb r2, [r1, SPI_SR]
     tst r2, SPI_SR_TXE
     beq LOC(WAIT_TX_EMPTY)
 
-    str r0, [r1, SPI_DR]
+    strb r0, [r1, SPI_DR]
     pop {{r1, r2, pc}}
 
   LOC({SPI2_BASE}):         .word SPI2_BASE
@@ -116,7 +107,7 @@ FUNCTION(st7789_cd)
     push {{r1, r2, lr}}
     ldr r1, LOC({SPI2_BASE})
   LOC(WAIT_BUSY):
-    ldr r2, [r1, SPI_SR]
+    ldrb r2, [r1, SPI_SR]
     tst r2, SPI_SR_BSY
     bne LOC(WAIT_BUSY)
 
@@ -127,11 +118,175 @@ FUNCTION(st7789_cd)
     strne r2, [r1]
     streq r2, [r1, 0x40]
     pop {{r1, r2, pc}}
-  // bit-band address for setting PB4
+  // bit-band address for setting PB14
   // (the reset bit is 0x10 bits above, that means +0x40 offset in bb-space)
-  LOC(BB_SET):              .word BB(GPIOB_BASE + GPIO_BSRR, 0x14)
+  LOC(BB_SET):              .word BB(GPIOB_BASE + GPIO_BSRR, 14)
   LOC({SPI2_BASE}):         .word SPI2_BASE
 ENDFUNC // st7789_cd
+
+
+FUNCTION(st7789_wait_msec)
+    push {{r0, r1, lr}}
+  LOC(NEXT_MSEC):
+    mov r1,36000
+  LOC(WAIT):
+    subs r1, 1
+    bne LOC(WAIT)
+    subs r0, 1
+    bne LOC(NEXT_MSEC)
+    pop {{r0, r1, pc}}
+ENDFUNC // st7789_wait_msec
+
+
+FUNCTION(st7789_initialise)
+    push {{lr}}
+
+    ST7789_MODE(0)
+    
+    ST7789_SEND(ST7789_CMD_SWRESET)
+    mov r0, 120
+    bl st7789_wait_msec
+
+    ST7789_SEND(ST7789_CMD_SLPOUT)
+    mov r0, 5
+    bl st7789_wait_msec
+
+    // clear device memory: full area, 12bpp
+    ST7789_SEND(ST7789_CMD_COLMOD)
+    ST7789_MODE(1)
+    ST7789_SEND(0x03)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_CASET)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x00, 0x00, 0xef)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_RASET)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x00, 0x01, 0x3f)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    mov r1, heval(86400 / 128) // 0xe0 * 0xe0 * 1.5
+    lsl r1, 7
+    mov r0, 0x111
+  LOC(CLRMEM):
+    bl st7789_send
+    subs r1, 1
+    bne LOC(CLRMEM)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_NOP)
+
+    ST7789_SEND(ST7789_CMD_DISPON)
+
+    ST7789_SEND(ST7789_CMD_COLMOD)
+    ST7789_MODE(1)
+    ST7789_SEND(0x05)
+    ST7789_MODE(0)
+
+    // ok: madctl=0x08, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x01..0x80: origo at lower left, x=horiz -> rot180
+    // ok: madctl=0x28, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower left, x=vert
+    // ok: madctl=0xa8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
+    // ok: madctl=0x68, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower right, x=vert
+    // ok: madctl=0xc8, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x03..0x82: origo at upper left, x=horiz
+    // ok: madctl=0xe8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
+    // for writing characters column by column, we need madctl=0xe8
+
+    ST7789_SEND(ST7789_CMD_MADCTL)
+    ST7789_MODE(1)
+    ST7789_SEND(0xe8)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_PTLAR)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x00, 0x00, 0x80)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_PTLON)
+    ST7789_SEND(ST7789_CMD_CASET)   // vertical range
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x03, 0x00, 0x82)
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_RASET)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x02, 0x00, 0x81)
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    
+    mov r8, 0       // y
+  LOC(LOOP_Y):
+    mov r7, 0       // x
+  LOC(LOOP_X):
+    cmp r7, 0
+    beq LOC(SET_YEL)
+    cmp r7, 0x7f
+    beq LOC(SET_GRN)
+    cmp r8, 0
+    beq LOC(SET_CYA)
+    cmp r8, 0x7f
+    beq LOC(SET_MAG)
+    cmp r7, r8
+    beq LOC(SET_BLU)
+
+    mov r2, 0
+    b LOC(SEND_PIXEL)
+
+  LOC(SET_RED):
+    mov r2, 0xf800
+    b LOC(SEND_PIXEL)
+  LOC(SET_YEL):
+    mov r2, 0xffe0
+    b LOC(SEND_PIXEL)
+  LOC(SET_GRN):
+    mov r2, 0x07e0
+    b LOC(SEND_PIXEL)
+  LOC(SET_CYA):
+    mov r2, 0x07ff
+    b LOC(SEND_PIXEL)
+  LOC(SET_BLU):
+    mov r2, 0x001f
+    b LOC(SEND_PIXEL)
+  LOC(SET_MAG):
+    mov r2, 0xf81f
+    b LOC(SEND_PIXEL)
+    
+ LOC(SEND_PIXEL):
+    lsr r0, r2, 8
+    bl st7789_send
+    and r0, r2, 0xff
+    bl st7789_send
+
+    add r7, 1
+    cmp r7, 0x80
+    bne LOC(LOOP_X)
+
+    add r8, 1
+    cmp r8, 0x80
+    bne LOC(LOOP_Y)
+
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_NOP)
+
+    pop {{pc}}
+ENDFUNC // st7789_initialise
+
+
+FUNCTION(st7789_set_color)
+    // In: r0 = 0xbbbbffff
+    push {{r1, lr}}
+    ldr r1, LOC(COLORS)
+    str r0, [r1]
+    pop {{r1, pc}}
+  LOC(COLORS):      .word st7789_colors
+ENDFUNC // st7789_set_color
+
+
+FUNCTION(SPI2_Handler)
+    push {{r0, r1, lr}}
+    //ldr r0, LOC({SPI2_BASE})
+    pop {{r0, r1, pc}}
+
+  LOC({SPI2_BASE}):         .word SPI2_BASE
+ENDFUNC // SPI2_Handler
 
 
 FUNCTION(st7789_setarea)
@@ -140,18 +295,7 @@ FUNCTION(st7789_setarea)
     //      r3 = endx
     //      r4 = endy
     push {{r0, lr}}
-
-    ST7789_SEND(ST7789_CMD_CASET)
-    ST7789_MODE(1)
-    mov r0, 0
-    bl st7789_send
-    add r0, r2, 0x03
-    bl st7789_send
-    mov r0, 0
-    bl st7789_send
-    add r0, r4, 0x03
-    bl st7789_send
-    ST7789_MODE(0)
+    // ok: madctl=0xe8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
 
     ST7789_SEND(ST7789_CMD_RASET)
     ST7789_MODE(1)
@@ -162,6 +306,18 @@ FUNCTION(st7789_setarea)
     mov r0, 0
     bl st7789_send
     add r0, r3, 0x02
+    bl st7789_send
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_CASET)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    add r0, r2, 0x03
+    bl st7789_send
+    mov r0, 0
+    bl st7789_send
+    add r0, r4, 0x03
     bl st7789_send
     ST7789_MODE(0)
 
@@ -183,11 +339,13 @@ FUNCTION(puts)
     bl st7789_setarea
     pop {{r3, r4}}
 
+    ldr r6, LOC(COLORS)
+    ldr r6, [r6]
+    // ITT TARTOK
+
     ST7789_SEND(ST7789_CMD_RAMWR)
     ST7789_MODE(1)
     ldr r7, LOC(CHARSET)
-    mov r6, 0                       // pixel buffer
-    mov r2, 0                       // 0=buffer is empty, other=one pixel is retained
     b LOC(SEND_CHAR)                // skip the first separator
 
   LOC(NEXT_CHAR):
@@ -197,7 +355,7 @@ FUNCTION(puts)
   LOC(SEND_CHAR):
     ldrb r1, [r5]                   // r0 = next char code
     cmp r1, 0
-    beq LOC(END_OF_STRING)
+    beq LOC(DONE)
     add r5, 1
 
     sub r1, 0x20
@@ -209,17 +367,6 @@ FUNCTION(puts)
     bl LOC(SEND_COLUMN)
 
     b LOC(NEXT_CHAR)
-
-  LOC(END_OF_STRING):
-    // check if the last pixel is still retained
-    cmp r2, 0
-    beq LOC(DONE)
-
-    // send out that last 1.5 bytes as 2 bytes
-    lsr r0, r6, 4
-    bl st7789_send
-    lsl r0, r6, 4
-    bl st7789_send
 
   LOC(DONE):
     ST7789_MODE(0)
@@ -234,7 +381,6 @@ FUNCTION(puts)
     mov r8, 0x10                    // mask for pixel to send
 
   LOC(NEXT_PIXEL):
-    lsl r6, 12
     tst r1, r8
     ite eq
     orreq r6, r4                    // background colour
@@ -257,6 +403,7 @@ FUNCTION(puts)
 
   LOC(CHARSET):             .word charset
 ENDFUNC // puts
+
 // --------------------------------------------------------------------------
     .section .rodata
     .align(4)
@@ -368,5 +515,10 @@ charset:
     .hword 0b100000100011000    // 0x7e = ~
     .hword 0b111110101000100    // 0x7f = Del
 
-// vim: set ts=4 sw=4 et:
+// --------------------------------------------------------------------------
+    .section .data
+    .align(4)
 
+st7789_colors:  .hword 0, 0     // [0]=bg, [1]=fg
+
+// vim: set ts=4 sw=4 et:

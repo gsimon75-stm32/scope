@@ -33,42 +33,6 @@ define({STATE_SENDING},             heval(4 << 3))
     .section .text
     .align(4)
 
-FUNCTION(st7789_initialise)
-    push {{lr}}
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_SLPOUT)
-    ST7789_SEND(ST7789_CMD_DISPON)
-    ST7789_SEND(ST7789_CMD_PTLON)
-
-    ST7789_SEND(ST7789_CMD_COLMOD)
-    ST7789_MODE(1)
-    ST7789_SEND(0x03)
-    ST7789_MODE(0)
-
-    ST7789_SEND(ST7789_CMD_MADCTL)
-    ST7789_MODE(1)
-    ST7789_SEND(0xe8)
-    ST7789_MODE(0)
-
-    ST7789_SEND(ST7789_CMD_CASET)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x03, 0x00, 0x82)
-    ST7789_MODE(0)
-    
-    ST7789_SEND(ST7789_CMD_RASET)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x02, 0x00, 0x81)
-    ST7789_MODE(0)
-
-    ST7789_SEND(ST7789_CMD_PTLAR)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x1, 0x00, 0x80)
-    ST7789_MODE(0)
-    
-    pop {{pc}}
-ENDFUNC // st7789_initialise
-
-
 FUNCTION(adc_setup)
     push {{lr}}
 
@@ -149,69 +113,6 @@ FUNCTION(adc_configure)
     pop {{r0, r1, r3, pc}}
   LOC({RCC_BASE}):      .word RCC_BASE
 ENDFUNC // adc_configure
-
-
-FUNCTION(display_samples)
-    push {{r0-r7, lr}}
-    mov r1, 0
-    mov r3, 0x7f
-    mov r2, 0
-    mov r4, 0x7f
-    bl st7789_setarea
-
-    ST7789_SEND(ST7789_CMD_RAMWR)
-    ST7789_MODE(1)
-    mov r3, 0   // pixel buffer
-
-    ldr r5, LOC({SAMPLES})  // start of source
-    add r6, r5, heval(2 * 128) // end of source
-
-  LOC(NEXT_COLUMN):
-    ldrh r7, [r5]  // y
-    lsr r7, 5
-
-    mov r2, 0   // loop y
-  LOC(LOOP_Y):
-
-    cmp r2, 0x40
-    it eq
-    orreq r3, 0x0f0
-
-    cmp r2, r7
-    itt eq
-    moveq r0, 0xfff
-    orreq r3, r0
-
-    // handle pixel
-    tst r3, 0x80000000
-    ittt eq
-    lsleq r3, 12
-    orreq r3, 0x80000000
-    beq LOC(PROCEED)
-    lsr r0, r3, 16
-    bl st7789_send
-    lsr r0, r3, 8
-    bl st7789_send
-    mov r0, r3
-    bl st7789_send
-    mov r3, 0
-  LOC(PROCEED):
-
-    add r2, 1
-    cmp r2, 0x80
-    blo LOC(LOOP_Y)
-
-    //add r5, 1
-    add r5, 2
-    cmp r5, r6
-    blo LOC(NEXT_COLUMN)
-
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_NOP)
-    pop {{r0-r7, pc}}
-
-  LOC({SAMPLES}):           .word samples
-ENDFUNC // display_samples
 
 
 FUNCTION(tim2_setup)
@@ -313,7 +214,17 @@ FUNCTION(main)
     bl usb_hw_setup
     bl st7789_setup
     bl st7789_initialise
+
+  LOC(QWER):
+    b LOC(QWER)
     
+    mov r1, 10
+    mov r2, 10
+    mov r3, 0xf00
+    mov r4, 0x0ff
+    adr r5, LOC(YADDA)
+    bl puts
+
     ldr rADC, LOC({ADC1_BASE})
     ldr rDMA, LOC({DMA1_BASE})
 
@@ -448,6 +359,8 @@ FUNCTION(main)
   LOC(USB_EP_BUFFERS):      .word usb_ep_buffers
 
   LOC(TICK):                .word heval(SysTick_BASE + SysTick_VAL)
+  LOC(YADDA):               .string "Yadda Boo"
+  .align 4
 ENDFUNC // main
 
 
@@ -457,7 +370,6 @@ FUNCTION(DMA1_Channel1_Handler)
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]  // disable channel1
     mov r0, DMA_IR_GIF1        // clear irq flags
     str r0, [rDMA, DMA_IFCR]
-    bl display_samples
     b DMA1_Channel_1_5_Common
 ENDFUNC // DMA1_Channel1_Handler
 
