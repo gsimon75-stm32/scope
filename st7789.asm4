@@ -306,8 +306,9 @@ FUNCTION(st7789_setarea_curpos)
     ldrb r1, [r2, ST7789_STATE_COLUMN]
 
     lsl r1, 2   // r1 = column *= 4
-    lsl r2, r0, 2
-    add r2, r0  // r2 = row *= 5
+    lsl r0, 1
+    lsl r2, r0, 1
+    add r2, r0  // r2 = row *= 6
 
     ST7789_SEND(ST7789_CMD_RASET)
     ST7789_MODE(1)

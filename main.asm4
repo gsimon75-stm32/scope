@@ -240,7 +240,42 @@ FUNCTION(main)
     adr r0, LOC(YADDA)
     bl puts
 
+    mov r1, 0
+    mov r0, 0xffff
+    bl st7789_set_color
+    
+    mov r2, 0 // wait counter
+    mov r1, 0 // scroll row
   LOC(QWER):
+    add r2, 1
+    cmp r2, 0x580000
+    blo LOC(QWER)
+
+    adr r0, LOC(X)
+    bl puts
+
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_VSCRSADD)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    // r1 = 0x80 - 6*r1
+    mov r2, r1
+    lsl r2, 1
+    add r2, r1
+    lsl r2, 1
+    mov r0, 0x80
+    sub r0, r2
+    bl st7789_send
+    ST7789_MODE(0)
+
+    mov r2, 0   // clear wait counter
+
+    add r1, 1
+    cmp r1, 21
+    blo LOC(QWER)
+
+    mov r1, 0
     b LOC(QWER)
     
     mov r1, 10
@@ -385,6 +420,7 @@ FUNCTION(main)
 
   LOC(TICK):                .word heval(SysTick_BASE + SysTick_VAL)
   LOC(YADDA):               .string "Yadda Boo"
+  LOC(X):                   .string "X"
   .align 4
 ENDFUNC // main
 
