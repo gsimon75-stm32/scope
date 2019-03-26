@@ -81,7 +81,7 @@ FUNCTION(st7789_setup)
     ldr r0, LOC({SPI2_BASE})
     // NOTE: SPI clock is set to clk/2 = 36 MHz, the specified maximum for ST7789 is 33.3 MHz.
     // This seems to work, but if there are troubles, set it back to 18 MHz.
-    mov r1, heval((7 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
+    mov r1, heval((0 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
     str r1, [r0, SPI_CR1]
 
     mov r1, heval(SPI_CR2_SSOE) // + SPI_CR2_TXEIE) // + SPI_CR2_TXDMAEN)
@@ -210,7 +210,7 @@ FUNCTION(st7789_initialise)
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLAR)
     ST7789_MODE(1)
-    ST7789_SEND(0, 0, 0, 0x80)  // visible panel area, NOTE: not ST7789_MAXY, because the 'not displayed' area is white...
+    ST7789_SEND(0, 0, 0, heval(ST7789_MAXY - 1))  // visible panel area
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLON)
     ST7789_SEND(ST7789_CMD_CASET)
@@ -447,6 +447,18 @@ FUNCTION(puts)
     lsl r0, r8, 1
     add r0, r8
     bl st7789_send
+
+    // clear the new line
+    ST7789_MODE(0)
+    bl st7789_setarea_curpos
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    mov r0, 0
+    mov r8, heval(6*128*2)
+  LOC(CLEAR_NEW_LINE):
+    bl st7789_send
+    subs r8, 1
+    bne LOC(CLEAR_NEW_LINE)
 
   LOC(UPDATE_AREA):
     ST7789_MODE(0)
