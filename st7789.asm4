@@ -15,11 +15,12 @@ define({ST7789_STATE_COLUMN},   0x05)
 define({ST7789_STATE_SCROLLUP}, 0x06)
 define({ST7789_STATE_SIZEOF},   0x07)
 
-define({ST7789_ROWS},           18)
+define({ST7789_ROWS},           21)
 define({ST7789_MAXX},           128)
 define({ST7789_MAXY},           heval(6 * ST7789_ROWS))
 
-define({ST7789_CASET_BASE},     1)
+dnl define({ST7789_CASET_BASE},     1)
+define({ST7789_CASET_BASE},     0)
 define({ST7789_RASET_BASE},     2)
 
 // --------------------------------------------------------------------------
@@ -310,9 +311,13 @@ FUNCTION(st7789_setarea_curpos)
     ldrb r0, [r2, ST7789_STATE_ROW]
     ldrb r1, [r2, ST7789_STATE_SCROLLUP]
     add r0, r1
-    cmp r0, ST7789_ROWS
-    it hs
-    subhs r0, ST7789_ROWS
+    cmp r0, 22      // 22 = 132 / 6
+    blo LOC(NO_SCREEN_WRAP)
+
+  LOC(_SCREEN_WRAP):
+    sub r0, 22
+  LOC(NO_SCREEN_WRAP):
+
     ldrb r1, [r2, ST7789_STATE_COLUMN]
 
     lsl r1, 2   // r1 = column *= 4
@@ -417,7 +422,7 @@ FUNCTION(puts)
     mov r8, 0
     strb r8, [r2, ST7789_STATE_COLUMN]
     ldrb r8, [r2, ST7789_STATE_ROW]
-    cmp r8, heval(ST7789_ROWS + 1)
+    cmp r8, heval(ST7789_ROWS - 1)
     ite lo
     addlo r8, 1
     bhs LOC(SCROLL_UP)
@@ -426,7 +431,7 @@ FUNCTION(puts)
 
   LOC(SCROLL_UP):
     ldrb r8, [r2, ST7789_STATE_SCROLLUP]
-    cmp r8, ST7789_ROWS
+    cmp r8, 22
     ite eq
     moveq r8, 0
     addne r8, 1
@@ -442,7 +447,6 @@ FUNCTION(puts)
     lsl r0, r8, 1
     add r0, r8
     bl st7789_send
-    ST7789_MODE(0)
 
   LOC(UPDATE_AREA):
     ST7789_MODE(0)
