@@ -131,6 +131,7 @@ FUNCTION(tim2_setup)
     bic r1, heval(MASK(GPIO_CRH_MODE15) | MASK(GPIO_CRH_CNF15))
     orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE15_Shift)
     orr r1, heval(GPIO_CNF_ALTERNATE_PP << GPIO_CRH_CNF15_Shift)
+    str r1, [r0, GPIO_CRH]
 
     // configure TIM2 pins to partially alternate location -> CH1 to PA15
     ldr r0, LOC({AFIO_BASE})
@@ -174,6 +175,65 @@ FUNCTION(tim2_setup)
 ENDFUNC // tim2_setup
 
 
+FUNCTION(test_screen)
+    ldr r0, LOC({X})
+    mov r1, 'A'
+    strh r1, [r0]
+
+    mov r0, 12   // row
+    mov r1, 18   // column
+    bl st7789_gotoxy
+
+    mov r1, 0
+    mov r0, 0xf800
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
+    mov r1, 0
+    mov r0, 0x07e0
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
+    mov r1, 0
+    mov r0, 0x001f
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
+    mov r1, 0
+    mov r0, 0xffff
+    bl st7789_set_color
+    
+    mov r2, 0 // wait counter
+  LOC(QWER):
+    add r2, 1
+    cmp r2, 0x58000
+    blo LOC(QWER)
+
+    ldr r0, LOC({X})
+    bl puts
+    ldrb r2, [r0]
+    cmp r2, 'Z'
+    ite eq
+    moveq r2, 'A'
+    addne r2, 1
+    strb r2, [r0]
+
+    mov r2, 0   // clear wait counter
+    b LOC(QWER)
+    
+  LOC(YADDA):               .string "Yadda Boo"
+  .align 4
+  LOC({X}):                 .word X
+
+ENDFUNC // test_screen
+
+
 FUNCTION(main)
     // enable interrupts
     ldr r0, LOC({NVIC_BASE})
@@ -215,75 +275,7 @@ FUNCTION(main)
     bl st7789_setup
     bl st7789_initialise
 
-    mov r0, 2   // row
-    mov r1, 18   // column
-    bl st7789_gotoxy
-
-    mov r1, 0
-    mov r0, 0xf800
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0x07e0
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0x001f
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0xffff
-    bl st7789_set_color
-    
-    mov r2, 0 // wait counter
-    mov r1, 0 // scroll row
-  LOC(QWER):
-    add r2, 1
-    cmp r2, 0x580000
-    blo LOC(QWER)
-
-    adr r0, LOC(X)
-    bl puts
-
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_VSCRSADD)
-    ST7789_MODE(1)
-    mov r0, 0
-    bl st7789_send
-    // r1 = 0x80 - 6*r1
-    mov r2, r1
-    lsl r2, 1
-    add r2, r1
-    lsl r2, 1
-    mov r0, 0x80
-    sub r0, r2
-    bl st7789_send
-    ST7789_MODE(0)
-
-    mov r2, 0   // clear wait counter
-
-    add r1, 1
-    cmp r1, 21
-    blo LOC(QWER)
-
-    mov r1, 0
-    b LOC(QWER)
-    
-    mov r1, 10
-    mov r2, 10
-    mov r3, 0xf00
-    mov r4, 0x0ff
-    adr r5, LOC(YADDA)
-    bl puts
+    b test_screen // doesn't return
 
     ldr rADC, LOC({ADC1_BASE})
     ldr rDMA, LOC({DMA1_BASE})
@@ -419,9 +411,6 @@ FUNCTION(main)
   LOC(USB_EP_BUFFERS):      .word usb_ep_buffers
 
   LOC(TICK):                .word heval(SysTick_BASE + SysTick_VAL)
-  LOC(YADDA):               .string "Yadda Boo"
-  LOC(X):                   .string "X"
-  .align 4
 ENDFUNC // main
 
 
@@ -493,6 +482,7 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     // analog sweep     'A'   trig    #samples      trig level    adc spd
     // digital sweep    'D'   trig    #samples      timer cnt
     // pwm              'P'   N/A     total         duty
+    // event            'E'   n
 
     ldr r3, LOC(RXBUF)
     ldrb r2, [r3]               // byte0 = CMD
@@ -503,6 +493,8 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     beq LOC(DIGITAL_SWEEP)
     cmp r2, 'P'
     beq LOC(PWM)
+    cmp r2, 'E'
+    beq LOC(EVENT)
 
   LOC(DONE):
     // set EP1R to enable transmission
@@ -587,6 +579,53 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     str r2, [r4, TIM_CCR1]
     b LOC(DONE)
 
+ LOC(EVENT):
+    // process byte1: custom event idx
+    ldrb r2, [r3, 1] 
+    cmp r2, 1
+    beq LOC(EVENT_1)
+    cmp r2, 2
+    beq LOC(EVENT_2)
+    cmp r2, 3
+    beq LOC(EVENT_3)
+    cmp r2, 4
+    beq LOC(EVENT_4)
+    b LOC(DONE)
+
+  LOC(EVENT_1):
+    push {{r0}}
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_SWRESET)
+    ST7789_MODE(0)
+    pop {{r0}}
+    b LOC(DONE)
+  
+  LOC(EVENT_2):
+    push {{r0}}
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_MADCTL)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00)
+    ST7789_MODE(0)
+    pop {{r0}}
+    b LOC(DONE)
+  
+  LOC(EVENT_3):
+    push {{r0}}
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_RDDID)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00)
+    ST7789_SEND(0x00)
+    ST7789_SEND(0x00)
+    ST7789_SEND(0x00)
+    ST7789_MODE(0)
+    pop {{r0}}
+    b LOC(DONE)
+  
+  LOC(EVENT_4):
+    b LOC(DONE)
+
   LOC(RXBUF):               .word USB_EP1_RX_BUF
   LOC(TRIG_LEVEL):          .word trig_level
   LOC(COMMAND):             .word command
@@ -601,6 +640,9 @@ ENDFUNC // usb_ep1_rx_notify
 
 // --------------------------------------------------------------------------
     .section .data
+
+X           .hword 0
+    .align 4
 
 command     .byte 0
     .align 4
