@@ -6,6 +6,14 @@ include(st7789.m4)
     CR is SPI2/MISO
     RST is on Reset */
 
+// state structure
+define({ST7789_STATE_COLORS},   0x00)   // bg+fgcolor as word
+define({ST7789_STATE_FGCOLOR},  0x00)
+define({ST7789_STATE_BGCOLOR},  0x02)
+define({ST7789_STATE_ROW},      0x04)
+define({ST7789_STATE_COLUMN},   0x05)
+define({ST7789_STATE_SIZEOF},   0x06)
+
 
 // --------------------------------------------------------------------------
     .section .text
@@ -271,12 +279,14 @@ ENDFUNC // st7789_initialise
 
 
 FUNCTION(st7789_set_color)
-    // In: r0 = 0xbbbbffff
-    push {{r1, lr}}
-    ldr r1, LOC(COLORS)
-    str r0, [r1]
-    pop {{r1, pc}}
-  LOC(COLORS):      .word st7789_colors
+    // In:  r0 = fgcolor
+    //      r1 = bgcolor
+    push {{r2, lr}}
+    ldr r2, LOC(STATE)
+    strh r0, [r2, ST7789_STATE_FGCOLOR]
+    strh r1, [r2, ST7789_STATE_BGCOLOR]
+    pop {{r2, pc}}
+  LOC(STATE):      .word st7789_state
 ENDFUNC // st7789_set_color
 
 
@@ -289,13 +299,15 @@ FUNCTION(SPI2_Handler)
 ENDFUNC // SPI2_Handler
 
 
-FUNCTION(st7789_setarea)
-    // In:  r1 = startx
-    //      r2 = starty
-    //      r3 = endx
-    //      r4 = endy
-    push {{r0, lr}}
-    // ok: madctl=0xe8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
+FUNCTION(st7789_setarea_curpos)
+    push {{r0-r2, lr}}
+    ldr r2, LOC(STATE)
+    ldrb r0, [r2, ST7789_STATE_ROW]
+    ldrb r1, [r2, ST7789_STATE_COLUMN]
+
+    lsl r1, 2   // r1 = column *= 4
+    lsl r2, r0, 2
+    add r2, r0  // r2 = row *= 5
 
     ST7789_SEND(ST7789_CMD_RASET)
     ST7789_MODE(1)
@@ -305,7 +317,7 @@ FUNCTION(st7789_setarea)
     bl st7789_send
     mov r0, 0
     bl st7789_send
-    add r0, r3, 0x02
+    mov r0, 0x81
     bl st7789_send
     ST7789_MODE(0)
 
@@ -317,31 +329,52 @@ FUNCTION(st7789_setarea)
     bl st7789_send
     mov r0, 0
     bl st7789_send
-    add r0, r4, 0x03
+    add r0, r2, 0x08
     bl st7789_send
     ST7789_MODE(0)
+    pop {{r0-r2, pc}}
+  LOC(STATE):      .word st7789_state
+ENDFUNC // st7789_setarea_curpos
 
-    pop {{r0, pc}}
-ENDFUNC // st7789_setarea
+
+FUNCTION(st7789_gotoxy)
+    // In:  r0 = row
+    //      r1 = column
+    push {{r2, lr}}
+    ldr r2, LOC(STATE)
+    strb r0, [r2, ST7789_STATE_ROW]
+    strb r1, [r2, ST7789_STATE_COLUMN]
+    bl st7789_setarea_curpos
+    pop {{r2, pc}}
+  LOC(STATE):      .word st7789_state
+ENDFUNC // st7789_gotoxy
 
 
 FUNCTION(puts)
-    // In:  r1 = x
-    //      r2 = y
-    //      r3 = fg colour
-    //      r4 = bg colour
-    //      r5 = asciiz string
+    // In:  r0 = asciiz string
     push {{r0-r8, lr}}
 
-    push {{r3, r4}}
-    mov r3, 0x7f
-    add r4, r2, 4
-    bl st7789_setarea
-    pop {{r3, r4}}
+    // r0: temp for sending byte
+    // r1: column bitmask
+    // r2: state
+    // r3:
+    // r4:
+    // r5: input string
+    // r6: colors temp
+    // r7: charset
+    // r8: loop mask
 
-    ldr r6, LOC(COLORS)
-    ldr r6, [r6]
-    // ITT TARTOK
+    bl st7789_setarea_curpos
+
+    mov r5, r0
+    ldr r2, LOC(STATE)
+    ldr r6, [r2, ST7789_STATE_COLORS]
+    // byte-swap colors
+    and r1, r6, 0x00ff00ff
+    lsl r1, 8
+    and r6, 0xff00ff00
+    lsr r6, 8
+    orr r6, r1
 
     ST7789_SEND(ST7789_CMD_RAMWR)
     ST7789_MODE(1)
@@ -353,13 +386,47 @@ FUNCTION(puts)
     bl LOC(SEND_COLUMN)
 
   LOC(SEND_CHAR):
-    ldrb r1, [r5]                   // r0 = next char code
+    ldrb r1, [r5]                   // r1 = next char code
+    add r5, 1                       // advance source ptr
     cmp r1, 0
     beq LOC(DONE)
-    add r5, 1
+    cmp r1, 0x0a                    // newline
+    beq LOC(NEW_LINE)
 
+    // advance cursor pos
+    ldrb r8, [r2, ST7789_STATE_COLUMN]
+    add r8, 1
+    cmp r8, 33
+    itt lo
+    strblo r8, [r2, ST7789_STATE_COLUMN]
+    blo LOC(PUT_CHAR)
+
+  LOC(NEW_LINE):
+    mov r8, 0
+    strb r8, [r2, ST7789_STATE_COLUMN]
+    ldrb r8, [r2, ST7789_STATE_ROW]
+    add r8, 1
+    cmp r8, 21
+    bhs LOC(SCROLL_UP)
+    strb r8, [r2, ST7789_STATE_ROW]
+    b LOC(UPDATE_AREA)
+
+  LOC(SCROLL_UP):
+    // FIXME: scroll up
+    sub r8, 1
+    strb r8, [r2, ST7789_STATE_ROW]
+
+  LOC(UPDATE_AREA):
+    ST7789_MODE(0)
+    bl st7789_setarea_curpos
+    mov r8, 1
+    strb r8, [r2, ST7789_STATE_COLUMN]
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+
+  LOC(PUT_CHAR):
     sub r1, 0x20
-    ldrh r1, [r7, r1, LSL 1]        // r0 = char pattern
+    ldrh r1, [r7, r1, LSL 1]        // r1 = char pattern
     bl LOC(SEND_COLUMN)
     lsr r1, 5
     bl LOC(SEND_COLUMN)
@@ -383,32 +450,32 @@ FUNCTION(puts)
   LOC(NEXT_PIXEL):
     tst r1, r8
     ite eq
-    orreq r6, r4                    // background colour
-    orrne r6, r3                    // foreground colour
+    lsreq r0, r6, 16                // background colour
+    movne r0, r6                    // foreground colour
 
-    eors r2, 1
-    bne LOC(DONT_SEND_YET)
-
-    lsr r0, r6, 16
     bl st7789_send
-    lsr r0, r6, 8
-    bl st7789_send
-    mov r0, r6
+    lsr r0, 8
     bl st7789_send
 
-  LOC(DONT_SEND_YET):
     lsrs r8, 1
     bne LOC(NEXT_PIXEL)
+
+    // bottom separator pixel
+    lsr r0, r6, 16                // background colour
+    bl st7789_send
+    lsr r0, 8
+    bl st7789_send
     pop {{pc}}
 
-  LOC(CHARSET):             .word charset
+  LOC(CHARSET):             .word st7789_charset
+  LOC(STATE):               .word st7789_state
 ENDFUNC // puts
 
 // --------------------------------------------------------------------------
     .section .rodata
     .align(4)
 
-charset:
+st7789_charset:
     /* range: 0x20..0x7f
     3x5 pixels per char -> 15 bits -> 1 hword per char
     d4..0=left column top to bottom, d9..d5=middle column, d14..d10=right column, d15=0 */
@@ -519,6 +586,7 @@ charset:
     .section .data
     .align(4)
 
-st7789_colors:  .hword 0, 0     // [0]=bg, [1]=fg
+st7789_state:   .skip ST7789_STATE_SIZEOF
+    .align(4)
 
 // vim: set ts=4 sw=4 et:

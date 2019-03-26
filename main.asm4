@@ -215,6 +215,31 @@ FUNCTION(main)
     bl st7789_setup
     bl st7789_initialise
 
+    mov r0, 2   // row
+    mov r1, 18   // column
+    bl st7789_gotoxy
+
+    mov r1, 0
+    mov r0, 0xf800
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
+    mov r1, 0
+    mov r0, 0x07e0
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
+    mov r1, 0
+    mov r0, 0x001f
+    bl st7789_set_color
+    
+    adr r0, LOC(YADDA)
+    bl puts
+
   LOC(QWER):
     b LOC(QWER)
     

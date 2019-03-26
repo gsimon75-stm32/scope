@@ -3,12 +3,12 @@ target remote localhost:3333
 mon halt
 
 define hook-stop
-  dump_USB_CNTR
-  dump_USB_ISTR
-  dump_USB_FNR
-  dump_USB_DADDR
-  dump_USB_EPR 1
-  dump_USB_EP 1
+  #dump_USB_CNTR
+  #dump_USB_ISTR
+  #dump_USB_FNR
+  #dump_USB_DADDR
+  #dump_USB_EPR 1
+  #dump_USB_EP 1
   info reg
   disas /r $r15,+32
 end
