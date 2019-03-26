@@ -12,8 +12,15 @@ define({ST7789_STATE_FGCOLOR},  0x00)
 define({ST7789_STATE_BGCOLOR},  0x02)
 define({ST7789_STATE_ROW},      0x04)
 define({ST7789_STATE_COLUMN},   0x05)
-define({ST7789_STATE_SIZEOF},   0x06)
+define({ST7789_STATE_SCROLLUP}, 0x06)
+define({ST7789_STATE_SIZEOF},   0x07)
 
+define({ST7789_ROWS},           18)
+define({ST7789_MAXX},           128)
+define({ST7789_MAXY},           heval(6 * ST7789_ROWS))
+
+define({ST7789_CASET_BASE},     2)
+define({ST7789_RASET_BASE},     2)
 
 // --------------------------------------------------------------------------
     .section .text
@@ -150,6 +157,10 @@ FUNCTION(st7789_initialise)
     push {{lr}}
 
     ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_MADCTL)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00)
+    ST7789_MODE(0)
     
     ST7789_SEND(ST7789_CMD_SWRESET)
     mov r0, 120
@@ -164,26 +175,45 @@ FUNCTION(st7789_initialise)
     ST7789_MODE(1)
     ST7789_SEND(0x03)
     ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_CASET)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x00, 0x00, 0xef)
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_RASET)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x00, 0x01, 0x3f)
-    ST7789_MODE(0)
+
+/*
     ST7789_SEND(ST7789_CMD_RAMWR)
     ST7789_MODE(1)
-    mov r1, heval(86400 / 128) // 0xe0 * 0xe0 * 1.5
-    lsl r1, 7
-    mov r0, 0x111
-  LOC(CLRMEM):
+
+    mov r0, 0
+    mov r1, 0x192
+  LOC(CLRMEM0):
     bl st7789_send
     subs r1, 1
-    bne LOC(CLRMEM)
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_NOP)
+    bne LOC(CLRMEM0)
 
+    mov r0, 0xff
+    bl st7789_send
+
+    mov r0, 0
+    mov r1, 0x80
+  LOC(CLRMEM1):
+    bl st7789_send
+    subs r1, 1
+    bne LOC(CLRMEM1)
+
+    //mov r0, 0xff
+    //bl st7789_send
+    //bl st7789_send
+
+    mov r0, 0
+    mov r1, 0x1000
+  LOC(CLRMEM2):
+    bl st7789_send
+    bl st7789_send
+    subs r1, 1
+    bne LOC(CLRMEM2)
+  LOC(ASDF):
+    b LOC(ASDF)
+
+    */
+
+    ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_DISPON)
 
     ST7789_SEND(ST7789_CMD_COLMOD)
@@ -191,46 +221,46 @@ FUNCTION(st7789_initialise)
     ST7789_SEND(0x05)
     ST7789_MODE(0)
 
-    // ok: madctl=0x08, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x01..0x80: origo at lower left, x=horiz -> rot180
+    // ok: madctl=0x08, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x01..0x80: origo at lower left, x=horiz
     // ok: madctl=0x28, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower left, x=vert
     // ok: madctl=0xa8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
     // ok: madctl=0x68, ptlar=0x00..0x80, caset=0x01..0x80, raset=0x02..0x81: origo at lower right, x=vert
     // ok: madctl=0xc8, ptlar=0x00..0x80, caset=0x02..0x81, raset=0x03..0x82: origo at upper left, x=horiz
     // ok: madctl=0xe8, ptlar=0x00..0x80, caset=0x03..0x82, raset=0x02..0x81: origo at upper left, x=vert
-    // for writing characters column by column, we need madctl=0xe8
+    // for writing characters column by column, we need madctl=0xe8, caset=y, raset=x
 
     ST7789_SEND(ST7789_CMD_MADCTL)
     ST7789_MODE(1)
-    ST7789_SEND(0xe8)
+    ST7789_SEND(0x28)
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLAR)
     ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x00, 0x00, 0x80)
+    ST7789_SEND(0, 0, 0, 0x7f)
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLON)
-    ST7789_SEND(ST7789_CMD_CASET)   // vertical range
+    ST7789_SEND(ST7789_CMD_CASET)
     ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x03, 0x00, 0x82)
+    ST7789_SEND(0, heval(ST7789_CASET_BASE + 0), 0, heval(ST7789_CASET_BASE + ST7789_MAXY - 1))
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_RASET)
     ST7789_MODE(1)
-    ST7789_SEND(0x00, 0x02, 0x00, 0x81)
+    ST7789_SEND(0, heval(ST7789_RASET_BASE + 0), 0, heval(ST7789_RASET_BASE + ST7789_MAXX - 1))
     ST7789_MODE(0)
 
     ST7789_SEND(ST7789_CMD_RAMWR)
     ST7789_MODE(1)
     
-    mov r8, 0       // y
+    mov r8, 0       // x
   LOC(LOOP_Y):
-    mov r7, 0       // x
+    mov r7, 0       // y
   LOC(LOOP_X):
     cmp r7, 0
-    beq LOC(SET_YEL)
-    cmp r7, 0x7f
+    beq LOC(SET_YEL)    // y==0 -> x axis
+    cmp r7, heval(ST7789_MAXY - 1)
     beq LOC(SET_GRN)
     cmp r8, 0
-    beq LOC(SET_CYA)
-    cmp r8, 0x7f
+    beq LOC(SET_CYA)    // x==0 -> y axis
+    cmp r8, heval(ST7789_MAXX - 1)
     beq LOC(SET_MAG)
     cmp r7, r8
     beq LOC(SET_BLU)
@@ -264,11 +294,11 @@ FUNCTION(st7789_initialise)
     bl st7789_send
 
     add r7, 1
-    cmp r7, 0x80
+    cmp r7, ST7789_MAXY
     bne LOC(LOOP_X)
 
     add r8, 1
-    cmp r8, 0x80
+    cmp r8, ST7789_MAXX
     bne LOC(LOOP_Y)
 
     ST7789_MODE(0)
@@ -303,6 +333,11 @@ FUNCTION(st7789_setarea_curpos)
     push {{r0-r2, lr}}
     ldr r2, LOC(STATE)
     ldrb r0, [r2, ST7789_STATE_ROW]
+    ldrb r1, [r2, ST7789_STATE_SCROLLUP]
+    add r0, r1
+    cmp r0, ST7789_ROWS
+    it hs
+    subhs r0, ST7789_ROWS
     ldrb r1, [r2, ST7789_STATE_COLUMN]
 
     lsl r1, 2   // r1 = column *= 4
@@ -310,29 +345,30 @@ FUNCTION(st7789_setarea_curpos)
     lsl r2, r0, 1
     add r2, r0  // r2 = row *= 6
 
-    ST7789_SEND(ST7789_CMD_RASET)
-    ST7789_MODE(1)
-    mov r0, 0
-    bl st7789_send
-    add r0, r1, 0x02
-    bl st7789_send
-    mov r0, 0
-    bl st7789_send
-    mov r0, 0x81
-    bl st7789_send
-    ST7789_MODE(0)
-
     ST7789_SEND(ST7789_CMD_CASET)
     ST7789_MODE(1)
     mov r0, 0
     bl st7789_send
-    add r0, r2, 0x03
+    add r0, r2, ST7789_CASET_BASE
     bl st7789_send
     mov r0, 0
     bl st7789_send
-    add r0, r2, 0x08
+    add r0, r2, heval(ST7789_CASET_BASE + 6 - 1)
     bl st7789_send
     ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_RASET)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    add r0, r1, ST7789_RASET_BASE
+    bl st7789_send
+    mov r0, 0
+    bl st7789_send
+    mov r0, heval(ST7789_RASET_BASE + ST7789_MAXX - 1)
+    bl st7789_send
+    ST7789_MODE(0)
+
     pop {{r0-r2, pc}}
   LOC(STATE):      .word st7789_state
 ENDFUNC // st7789_setarea_curpos
@@ -358,7 +394,7 @@ FUNCTION(puts)
     // r0: temp for sending byte
     // r1: column bitmask
     // r2: state
-    // r3:
+    // r3: temp misc
     // r4:
     // r5: input string
     // r6: colors temp
@@ -406,16 +442,32 @@ FUNCTION(puts)
     mov r8, 0
     strb r8, [r2, ST7789_STATE_COLUMN]
     ldrb r8, [r2, ST7789_STATE_ROW]
-    add r8, 1
-    cmp r8, 21
+    cmp r8, heval(ST7789_ROWS + 1)
+    ite lo
+    addlo r8, 1
     bhs LOC(SCROLL_UP)
     strb r8, [r2, ST7789_STATE_ROW]
     b LOC(UPDATE_AREA)
 
   LOC(SCROLL_UP):
-    // FIXME: scroll up
-    sub r8, 1
-    strb r8, [r2, ST7789_STATE_ROW]
+    ldrb r8, [r2, ST7789_STATE_SCROLLUP]
+    cmp r8, ST7789_ROWS
+    ite eq
+    moveq r8, 0
+    addne r8, 1
+    strb r8, [r2, ST7789_STATE_SCROLLUP]
+
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_VSCRSADD)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    // r0 = 6*r8
+    lsl r8, 1
+    lsl r0, r8, 1
+    add r0, r8
+    bl st7789_send
+    ST7789_MODE(0)
 
   LOC(UPDATE_AREA):
     ST7789_MODE(0)

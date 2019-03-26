@@ -30,8 +30,9 @@ uint16_t                resampled[MAX_SAMPLES];
 double                  raw_sampling_interval;
 #endif // DO_RESAMPLE
 
-bool                    do_send_pwm;
+uint8_t                 cmd = scope_command_t::NORMAL;
 uint16_t                send_pwm_total, send_pwm_duty;
+uint8_t                 custom_event_idx;
 
 #define VENDOR  0x5AFE
 #define PRODUCT 0x7E57
@@ -39,6 +40,7 @@ uint16_t                send_pwm_total, send_pwm_duty;
 #define PRODUCT_NAME  "STM32 Scope"
 
 #include <SDL.h>
+
 
 sigset_t sigset_comm;
 pthread_t thr_sampling = nullptr;
@@ -49,7 +51,7 @@ void sigusr1_handler(int n) {
 
 void sighup_handler(int n) {
     //fprintf(stderr, "SIGHUP caught: %p\n", pthread_self());
-    do_quit = true;
+    cmd = scope_command_t::QUIT;
 }
 
 #ifdef DO_RESAMPLE
@@ -100,82 +102,106 @@ main_loop(void *userdata) {
 
     uint8_t request[8];
     int n;
-    while (!do_quit) {
-        if (do_send_pwm) {
-            do_send_pwm = false;
-            request[0] = 'P'; // command: pwm
-            request[1] = 0;
-            request[2] = ( send_pwm_total       & 0xff);
-            request[3] = ((send_pwm_total >> 8) & 0xff);
-            request[4] = ( send_pwm_duty        & 0xff);
-            request[5] = ((send_pwm_duty  >> 8) & 0xff);
-            request[6] = 0;
-            request[7] = 0;
+    while (cmd != scope_command_t::QUIT) {
+        switch (cmd) {
+            case scope_command_t::SEND_PWM: {
+                cmd = scope_command_t::NORMAL;
+                request[0] = 'P'; // command: pwm
+                request[1] = 0;
+                request[2] = ( send_pwm_total       & 0xff);
+                request[3] = ((send_pwm_total >> 8) & 0xff);
+                request[4] = ( send_pwm_duty        & 0xff);
+                request[5] = ((send_pwm_duty  >> 8) & 0xff);
+                request[6] = 0;
+                request[7] = 0;
 
-            n = 0;
-            res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
-            if (res != LIBUSB_SUCCESS) // FIXME: could not send data
-                continue;
+                n = 0;
+                res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
+                if (res != LIBUSB_SUCCESS) // FIXME: could not send data
+                    continue;
+            }
+            break;
+
+            case scope_command_t::SEND_CUSTOM_EVENT: {
+                cmd = scope_command_t::NORMAL;
+                request[0] = 'E'; // command: pwm
+                request[1] = custom_event_idx;
+                request[2] = 0;
+                request[3] = 0;
+                request[4] = 0;
+                request[5] = 0;
+                request[6] = 0;
+                request[7] = 0;
+
+                n = 0;
+                res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
+                if (res != LIBUSB_SUCCESS) // FIXME: could not send data
+                    continue;
+            }
+            break;
+
+            case scope_command_t::NORMAL: {
+                request[0] = 'A'; // command: analog sweep
+                request[1] = trig_dir + trig_source;
+                request[2] = ( num_samples       & 0xff);
+                request[3] = ((num_samples >> 8) & 0xff);
+                request[4] = ( (trig_level << 4)        & 0xff);
+                request[5] = (((trig_level << 4)  >> 8) & 0xff);
+                request[6] = sample_rate;
+                request[7] = 0;
+
+                n = 0;
+                res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
+                if (res != LIBUSB_SUCCESS) // FIXME: could not send data
+                    continue;
+
+                n = 0;
+                //fprintf(stderr, "receiving analog... ");
+                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
+                //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
+                if (res != LIBUSB_SUCCESS) // FIXME: reception error
+                    continue;
+
+                n /= sizeof(samples[0]);
+#ifdef DO_RESAMPLE
+                n = resample(resampled, n, samples);
+                add_analog_samples(n, &resampled[0]);
+#else // DO_RESAMPLE
+                add_analog_samples(n, &samples[0]);
+#endif // DO_RESAMPLE
+
+                request[0] = 'D'; // command: analog sweep
+                request[1] = trig_dir + trig_source;
+                request[2] =  num_samples       & 0xff;
+                request[3] = (num_samples >> 8) & 0xff;
+                n = 14 * (sample_rate + 1) - 1;
+                request[4] =  n       & 0xff;
+                request[5] = (n >> 8) & 0xff;
+                request[6] = 0;
+                request[7] = 0;
+
+                n = 0;
+                res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
+                if (res != LIBUSB_SUCCESS) // FIXME: could not send data
+                    continue;
+
+                n = 0;
+                //fprintf(stderr, "receiving digital... ");
+                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
+                //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
+                if (res != LIBUSB_SUCCESS) // FIXME: reception error
+                    continue;
+
+                n /= sizeof(samples[0]);
+#ifdef DO_RESAMPLE
+                n = resample(resampled, n, samples);
+                add_digital_samples(n, &resampled[0]);
+#else // DO_RESAMPLE
+                add_digital_samples(n, &samples[0]);
+#endif // DO_RESAMPLE
+            }
+            break;
         }
-
-        request[0] = 'A'; // command: analog sweep
-        request[1] = trig_dir + trig_source;
-        request[2] = ( num_samples       & 0xff);
-        request[3] = ((num_samples >> 8) & 0xff);
-        request[4] = ( (trig_level << 4)        & 0xff);
-        request[5] = (((trig_level << 4)  >> 8) & 0xff);
-        request[6] = sample_rate;
-        request[7] = 0;
-
-        n = 0;
-        res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
-        if (res != LIBUSB_SUCCESS) // FIXME: could not send data
-            continue;
-
-        n = 0;
-        //fprintf(stderr, "receiving analog... ");
-        res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
-        //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
-        if (res != LIBUSB_SUCCESS) // FIXME: reception error
-            continue;
-
-        n /= sizeof(samples[0]);
-#ifdef DO_RESAMPLE
-        n = resample(resampled, n, samples);
-        add_analog_samples(n, &resampled[0]);
-#else // DO_RESAMPLE
-        add_analog_samples(n, &samples[0]);
-#endif // DO_RESAMPLE
-
-        request[0] = 'D'; // command: analog sweep
-        request[1] = trig_dir + trig_source;
-        request[2] =  num_samples       & 0xff;
-        request[3] = (num_samples >> 8) & 0xff;
-        n = 14 * (sample_rate + 1) - 1;
-        request[4] =  n       & 0xff;
-        request[5] = (n >> 8) & 0xff;
-        request[6] = 0;
-        request[7] = 0;
-
-        n = 0;
-        res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
-        if (res != LIBUSB_SUCCESS) // FIXME: could not send data
-            continue;
-
-        n = 0;
-        //fprintf(stderr, "receiving digital... ");
-        res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
-        //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
-        if (res != LIBUSB_SUCCESS) // FIXME: reception error
-            continue;
-
-        n /= sizeof(samples[0]);
-#ifdef DO_RESAMPLE
-        n = resample(resampled, n, samples);
-        add_digital_samples(n, &resampled[0]);
-#else // DO_RESAMPLE
-        add_digital_samples(n, &samples[0]);
-#endif // DO_RESAMPLE
     }
     fprintf(stderr, "exited thread loop\n");
     return nullptr;
@@ -230,11 +256,19 @@ set_trig_source(uint8_t n) {
 }
 
 void set_pwm(uint16_t total, uint16_t duty) {
-    while (do_send_pwm)
+    while (cmd != scope_command_t::NORMAL)
         ;
     send_pwm_total = total;
     send_pwm_duty = duty;
-    do_send_pwm = true;
+    cmd = scope_command_t::SEND_PWM;
+    pthread_kill(thr_sampling, SIGUSR1);
+}
+
+void send_custom_event(uint8_t n) {
+    while (cmd != scope_command_t::NORMAL)
+        ;
+    custom_event_idx = n;
+    cmd = scope_command_t::SEND_CUSTOM_EVENT;
     pthread_kill(thr_sampling, SIGUSR1);
 }
 
@@ -300,7 +334,7 @@ init_device(const char *devname) {
 
 void
 shutdown_device() {
-    do_quit = true;
+    cmd = scope_command_t::QUIT;
     printf("waiting for thread\n");
     if (thr_sampling) {
         pthread_kill(thr_sampling, SIGHUP);

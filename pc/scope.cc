@@ -14,8 +14,6 @@
 
 #include <stdexcept>
 
-bool do_quit = false;
-
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
@@ -88,7 +86,8 @@ main(int argc, char **argv) {
 
     init_ui();
     init_screen();
-    do_quit |= !init_device("/dev/ttyUSB1");
+    if (!init_device("/dev/ttyUSB1"))
+        cmd = scope_command_t::QUIT;
 
     set_sample_rate(sample_rate);
     set_trig_dir(trig_direction_t::RISING);
@@ -99,7 +98,7 @@ main(int argc, char **argv) {
     //redraw_voltage_scale(voltages[voltage_ref]);
     redraw_trig_marker();
 
-    while (!do_quit) {
+    while (cmd != scope_command_t::QUIT) {
         SDL_Event e;
         if (!SDL_WaitEvent(&e))
             continue;
@@ -118,7 +117,7 @@ main(int argc, char **argv) {
             case SDL_KEYDOWN:
             switch (e.key.keysym.sym) {
                 case SDLK_ESCAPE:
-                do_quit = true;
+                cmd = scope_command_t::QUIT;
                 break;
 
                 case SDLK_LEFT:
@@ -198,6 +197,22 @@ main(int argc, char **argv) {
                         commit_pwm();
                     }
                 }
+                break;
+
+                case SDLK_1:
+                send_custom_event(1);
+                break;
+
+                case SDLK_2:
+                send_custom_event(2);
+                break;
+
+                case SDLK_3:
+                send_custom_event(3);
+                break;
+
+                case SDLK_4:
+                send_custom_event(4);
                 break;
 
             }

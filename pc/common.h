@@ -52,12 +52,21 @@
 #define WINDOW_WIDTH (DIGITAL_SCREEN_X + DIGITAL_SCREEN_WIDTH)
 #define WINDOW_HEIGHT (DIGITAL_SCREEN_Y + DIGITAL_SCREEN_HEIGHT + 8)
 
-extern bool do_quit;
 extern SDL_Renderer *renderer;
 extern int quit_notify_fds[2];
 
 extern uint32_t user_event_type_base;
 #define UEVENT_DATA_READY 1
+
+struct scope_command_t {
+    enum {
+        QUIT                = 0,
+        NORMAL              = 1,
+        SEND_PWM            = 2,
+        SEND_CUSTOM_EVENT   = 3,
+    };
+};
+extern uint8_t cmd;
 
 struct trig_direction_t {
     enum {
