@@ -316,12 +316,8 @@ FUNCTION(st7789_setarea_curpos)
     ldrb r1, [r2, ST7789_STATE_SCROLLUP]
     add r0, r1
     cmp r0, 22      // 22 = 132 / 6
-    blo LOC(NO_SCREEN_WRAP)
-
-  LOC(_SCREEN_WRAP):
-    sub r0, 22
-  LOC(NO_SCREEN_WRAP):
-
+    it hs
+    subhs r0, 22
     ldrb r1, [r2, ST7789_STATE_COLUMN]
 
     lsl r1, 2   // r1 = column *= 4
@@ -435,7 +431,7 @@ FUNCTION(puts)
 
   LOC(SCROLL_UP):
     ldrb r8, [r2, ST7789_STATE_SCROLLUP]
-    cmp r8, 22
+    cmp r8, 21
     ite eq
     moveq r8, 0
     addne r8, 1
