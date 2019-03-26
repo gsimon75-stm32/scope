@@ -1,0 +1,870 @@
+include(stm32f10x.m4)
+
+// --------------------------------------------------------------------------
+// Case-dependent constants
+define({USB_VENDOR_ID},             0x5AFE)
+define({USB_PRODUCT_ID},            0x7E57)
+
+define({USB_EP0_BUFSIZE},           0x08)
+define({USB_EP1_RX_BUFSIZE},        0x08)
+define({USB_EP1_TX_BUFSIZE},        0x40)
+
+
+// --------------------------------------------------------------------------
+// Structure of configuration for USB Endpoints
+// This is used to initialise the Endpoint Descriptors in the PMA,
+// the EPnR Endpoint Registers and contains the rx-notify and tx-complete
+// callback addresses (set to zero if not needed).
+// The read-only symbol 'usb_ep_configs' is an array of such structs.
+define({USB_EP_CONFIG_EPR},         0x00)
+define({USB_EP_CONFIG_TXBUF_ADDR},  0x04)
+define({USB_EP_CONFIG_RXBUF_ADDR},  0x08)
+define({USB_EP_CONFIG_TXBUF_SIZE},  0x0c)
+define({USB_EP_CONFIG_RXBUF_SIZE},  0x0e)
+define({USB_EP_CONFIG_TX_CALLBACK}, 0x10)
+define({USB_EP_CONFIG_RX_CALLBACK}, 0x14)
+define({USB_EP_CONFIG_SIZEOF},      0x18)
+
+
+// --------------------------------------------------------------------------
+// USB Endpoint Register Initialiser
+// Convenience macro for calculating values for .USB_EP_CONFIG_EPR above
+// Args: TYPE, KIND, EA
+define({USB_EPR_INIT}, {heval(USB_EPR_EP_RX_VALID + $1 + $2 + USB_EPR_EP_TX_NAK + ($3 << USB_EPR_EA_Shift))})
+
+
+// --------------------------------------------------------------------------
+// Structure for USB TX buffer state
+// As transmission may be chunked if the data is longer than the max packet
+// size, a pointer and length must be maintained to keep track of the progress.
+// The read-write symbol 'usb_ep_buffers' is an array of such structs.
+define({USB_EP_BUFFER_PTR},         0x00)
+define({USB_EP_BUFFER_LEN},         0x04)
+define({USB_EP_BUFFER_SIZEOF},      0x08)
+
+
+// --------------------------------------------------------------------------
+// USB Standard related constants
+
+// bmRequestType.Type
+define({USB_REQ_TYPE_STANDARD},         0)
+define({USB_REQ_TYPE_CLASS},            1)
+define({USB_REQ_TYPE_VENDOR},           2)
+define({USB_REQ_TYPE_RESERVED},         3)
+
+// USB Standard Device Request Codes
+define({USB_REQ_GET_DEV_STATUS},        0x0080)
+define({USB_REQ_SET_ADDRESS},           0x0500)
+define({USB_REQ_GET_DESCRIPTOR},        0x0680)
+define({USB_REQ_SET_DESCRIPTOR},        0x0700)
+define({USB_REQ_GET_CONFIGURATION},     0x0880)
+define({USB_REQ_SET_CONFIGURATION},     0x0900)
+
+// USB Standard Interface Request Codes
+define({USB_REQ_GET_IFACE_STATUS},      0x0081)
+define({USB_REQ_GET_INTERFACE},         0x0a81)
+define({USB_REQ_SET_INTERFACE},         0x0b01)
+
+// USB Standard Endpoint Request Codes
+define({USB_REQ_GET_EP_STATUS},         0x0082)
+define({USB_REQ_SYNCH_FRAME},           0x0c02)
+
+// USB Descriptor Types
+define({USB_DESC_TYPE_DEVICE},          1)
+define({USB_DESC_TYPE_CFG},             2)
+define({USB_DESC_TYPE_STR},             3)
+define({USB_DESC_TYPE_IFACE},           4)
+define({USB_DESC_TYPE_EP},              5)
+define({USB_DESC_TYPE_DEVICE_QR},       6)
+define({USB_DESC_TYPE_OSPEED_CFG},      7)
+define({USB_DESC_TYPE_IFACE_PWR},       8)
+
+// USB Device Classes
+define({USB_CLASS_RESERVED},            0x00)
+define({USB_CLASS_AUDIO},               0x01)
+define({USB_CLASS_COMM},                0x02)
+define({USB_CLASS_HID},                 0x03)
+define({USB_CLASS_MONITOR},             0x04)
+define({USB_CLASS_PHYSIC},              0x05)
+define({USB_CLASS_POWER},               0x06)
+define({USB_CLASS_PRINTER},             0x07)
+define({USB_CLASS_STORAGE},             0x08)
+define({USB_CLASS_HUB},                 0x09)
+define({USB_CLASS_VENDOR_SPEC},         0xff)
+
+// Setup packet structure
+define({USB_PKT_SETUP_REQTYPE},         0)
+define({USB_PKT_SETUP_REQ},             1)
+define({USB_PKT_SETUP_VALUE},           4)
+define({USB_PKT_SETUP_VALUE_L},         4)
+define({USB_PKT_SETUP_VALUE_H},         5)
+define({USB_PKT_SETUP_INDEX},           8)
+define({USB_PKT_SETUP_INDEX_L},         8)
+define({USB_PKT_SETUP_INDEX_H},         9)
+define({USB_PKT_SETUP_LENGTH},          12)
+define({USB_PKT_SETUP_LENGTH_L},        12)
+define({USB_PKT_SETUP_LENGTH_H},        13)
+
+// Configuration Descriptor bmAttributes values
+define({USB_CFG_ATTR_SELF_POWERED},     0x40)
+define({USB_CFG_ATTR_REMOTE_WAKEUP},    0x20)
+
+// --------------------------------------------------------------------------
+    .section .text
+    .align(4)
+
+// Enable and reset the USB hardware
+// Does not assume the post-power-on defaults but indeed does a hard reset
+FUNCTION(usb_hw_setup)
+    push {{r0, r1, r2, r3, lr}}
+
+    ldr r0, LOC({RCC_BASE})
+
+    // enable GPIOA on APB2
+    ldr r1, [r0, RCC_APB2ENR]
+    orr r1, RCC_APB2ENR_IOPAEN
+    str r1, [r0, RCC_APB2ENR]
+
+    // enable USB on APB1
+    ldr r1, [r0, RCC_APB1ENR]
+    orr r1, RCC_APB1ENR_USBEN
+    str r1, [r0, RCC_APB1ENR]
+
+    // reset USB
+    ldr r1, [r0, RCC_APB1RSTR]
+    mov r2, r1
+    orr r2, RCC_APB1RSTR_USBRST
+    str r1, [r0, RCC_APB1RSTR]
+    bic r2, RCC_APB1RSTR_USBRST
+    str r2, [r0, RCC_APB1RSTR]
+
+    // configure GPIOA12 as push-pull output 2MHz
+    ldr r0, LOC({GPIOA_BASE})
+    ldr r1, [r0, GPIO_CRH]
+    bic r1, heval(MASK(GPIO_CRH_MODE12) | MASK(GPIO_CRH_CNF12))
+    orr r1, heval(GPIO_MODE_OUTPUT_2MHz << GPIO_CRH_MODE12_Shift)
+    orr r1, heval(GPIO_CNF_OUTPUT_PP << GPIO_CRH_CNF12_Shift)
+    str r1, [r0, GPIO_CRH]
+    // set GPIOA12 to 0
+    ldr r1, [r0, GPIO_ODR]
+    bic r1, heval(1 << 12)
+    str r1, [r0, GPIO_ODR]
+
+    // power down USB, let GPIO pull D+ to 0
+    ldr r0, LOC({USB_BASE})
+    mov r1, heval(USB_CNTR_PDWN + USB_CNTR_FRES)
+    str r1, [r0, USB_CNTR] // analogue power down + reset
+
+    // wait tstartup
+    mov r1, 0x200
+  LOC(WAIT_0):
+    subs r1, 1
+    bne LOC(WAIT_0)
+    
+    // configure GPIOA12 as floating input
+    ldr r0, LOC({GPIOA_BASE})
+    ldr r1, [r0, GPIO_CRH]
+    bic r1, heval(MASK(GPIO_CRH_MODE12) | MASK(GPIO_CRH_CNF12))
+    orr r1, heval(GPIO_MODE_INPUT << GPIO_CRH_MODE12_Shift)
+    orr r1, heval(GPIO_CNF_INPUT_FLOAT << GPIO_CRH_CNF12_Shift)
+    str r1, [r0, GPIO_CRH]
+
+    // power on and reset USB
+    ldr r0, LOC({USB_BASE})
+    mov r1, USB_CNTR_FRES
+    str r1, [r0, USB_CNTR]
+    
+    // wait tstartup
+    mov r1, 0x200
+  LOC(WAIT_1):
+    subs r1, 1
+    bne LOC(WAIT_1)
+    
+    mov r1, 0
+    str r1, [r0, USB_ISTR]                      // clear spurious interrupts
+    str r1, [r0, USB_DADDR]                     // clear device addr
+    str r1, [r0, USB_EP0R]                      // disable all endpoints
+    str r1, [r0, USB_EP1R]
+    str r1, [r0, USB_EP2R]
+    str r1, [r0, USB_EP3R]
+    str r1, [r0, USB_EP4R]
+    str r1, [r0, USB_EP5R]
+    str r1, [r0, USB_EP6R]
+    str r1, [r0, USB_EP7R]
+
+    str r1, [r0, USB_BTABLE]                    // set buffer table address to 0
+    
+    // copy usb_pma_desciptors to PMA
+    ldr r1, LOC(EP_CONFIGS)
+    ldr r2, LOC({USB_PMA_BASE})
+    mov r4, r2                                  // PMA base
+    mov r3, (usb_ep_configs_end - usb_ep_configs) / USB_EP_CONFIG_SIZEOF
+  LOC(COPY_PMA):
+    ldr r0, [r1, USB_EP_CONFIG_TXBUF_ADDR]
+    sub r0, r4
+    lsr r0, 1
+    stmia r2!, {{ r0 }}                         // USB_ADDR_TX
+    mov r0, 0
+    stmia r2!, {{ r0 }}                         // USB_COUNT_TX
+    ldr r0, [r1, USB_EP_CONFIG_RXBUF_ADDR]
+    sub r0, r4
+    lsr r0, 1
+    stmia r2!, {{ r0 }}                         // USB_ADDR_RX
+    ldrh r0, [r1, USB_EP_CONFIG_RXBUF_SIZE]
+    lsr r0, 1
+    cmp r0, 0x20
+    ittt hs
+    lsrhs r0, 4
+    subhs r0, 1
+    orrhs r0, 0x20
+    lsl r0, USB_COUNT_RX_NUM_BLOCK_Shift
+    stmia r2!, {{ r0 }}                         // USB_COUNT_RX
+    add r1, USB_EP_CONFIG_SIZEOF
+    subs r3, 1
+    bne LOC(COPY_PMA)
+
+    ldr r0, LOC({NVIC_BASE})                    // enable interrupts
+    ldr r1, [r0, NVIC_ISER]
+    orr r1, heval(1 << IRQ_USB_LP_CAN1_RX0)
+    str r1, [r0, NVIC_ISER]
+
+    // TODO: suspend/wakeup handling
+    //ldr r1, [r0, NVIC_ISER + 4]
+    //orr r1, heval(1 << (IRQ_USBWakeUp - 32))
+    //str r1, [r0, NVIC_ISER + 4]
+
+    ldr r0, LOC({USB_BASE})
+    mov r1, heval(USB_CNTR_RESETM + USB_CNTR_CTRM + USB_CNTR_ERRM) // clear the reset, enable some interrupt reasons
+    str r1, [r0, USB_CNTR]
+
+    pop {{r0, r1, r2, r3, pc}}
+  LOC({RCC_BASE}):          .word RCC_BASE
+  LOC({NVIC_BASE}):         .word NVIC_BASE
+  LOC({GPIOA_BASE}):        .word GPIOA_BASE
+  LOC({USB_BASE}):          .word USB_BASE
+
+  LOC(EP_CONFIGS):          .word usb_ep_configs
+  LOC({USB_PMA_BASE}):      .word USB_PMA_BASE
+ENDFUNC // usb_hw_setup
+
+
+// Wakeup IRQ handler, currently not supported
+FUNCTION(USBWakeUp_Handler)
+    bx lr
+ENDFUNC // USBWakeUp_Handler
+
+
+// USB Event IRQ handler
+FUNCTION(USB_LP_CAN1_RX0_Handler)
+    // r0-r3, r12 is saved implicitely
+    push {{r4-r6, lr}}
+
+    ldr r0, LOC({USB_BASE})
+
+    // parse USB_ISTR to find out the event(s)
+    ldr r1, [r0, USB_ISTR]
+
+    // ---- check for RESET event ----
+    tst r1, USB_ISTR_RESET
+    beq LOC(NOT_RESET)
+  LOC(RESET):
+    mvn r2, 0
+    bic r2, USB_ISTR_RESET
+    str r2, [r0, USB_ISTR]
+
+    // setup USB_EPnR registers
+    ldr r1, LOC(EP_CONFIGS)
+    mov r3, (usb_ep_configs_end - usb_ep_configs) / USB_EP_CONFIG_SIZEOF
+    add r4, r0, USB_EP0R
+  LOC(COPY_EPR):
+    ldr r2, [r1, USB_EP_CONFIG_EPR]
+    stmia r4!, {{ r2 }}
+    add r1, USB_EP_CONFIG_SIZEOF
+    subs r3, 1
+    bne LOC(COPY_EPR)
+
+    // initialise USB_DADDR and device_address to USB_DADDR_EF
+    mov r1, USB_DADDR_EF
+    str r1, [r0, USB_DADDR]
+    ldr r2, LOC(DEVICE_ADDRESS)
+    str r1, [r2]
+
+    // setup USB_CNTR to enable the needed event sources
+    mov r1, heval(USB_CNTR_CTRM + USB_CNTR_RESETM + USB_CNTR_ERRM)
+    str r1, [r0, USB_CNTR]
+    b LOC(DONE)
+  LOC(NOT_RESET):
+
+    // ---- check for ERR event ----
+    tst r1, USB_ISTR_ERR
+    beq LOC(NOT_ERR)
+  LOC(ERR):
+    //bkpt 1
+    mvn r2, 0
+    bic r2, USB_ISTR_ERR
+    str r2, [r0, USB_ISTR]
+  LOC(NOT_ERR):
+
+    // ---- check for SUSP event ----
+    // TODO: handle it here
+
+    // ---- check for WKUP event ----
+    // TODO: handle it here
+
+    // ---- check for CTR event ----
+    tst r1, USB_ISTR_CTR
+    beq LOC(DONE)
+
+    // separate IN (USB_ISTR_DIR=0) and OUT/SETUP (USB_ISTR_DIR=1)
+    // NOTE: The actual 'beq' is a few lines below, but as we reuse r1,
+    // some setup code is before it, which doesn't change the flags.
+    tst r1, USB_ISTR_DIR
+    and r2, r1, MASK(USB_ISTR_EP_ID)            // r2 = EA
+
+    mov r1, USB_EP_CONFIG_SIZEOF
+    ldr r3, LOC(EP_CONFIGS)
+    mla r3, r2, r1, r3                          // r3 = usb_ep_configs[EA]
+
+    ldr r1, [r0, r2, LSL 2]                     // r1 = USB_EPnR[EA]
+    beq LOC(CTR_IN)
+
+  LOC(CTR_OUT):                                 // handle an OUT/SETUP transfer
+    // CTR_RX is always set for OUT transfers, but a safety check won't hurt much
+    tst r1, USB_EPR_CTR_RX
+    beq LOC(DONE)
+
+    bic r1, USB_EPR_CTR_RX                      // clear CTR_RX flag
+    // NOTE: r1 must be written to USB_EPnR by the RX callback.
+    // The reason it's not done here is that the SETUP flag is cleared when
+    // CTR_RX goes zero, but the RX callback will need that information.
+    ldr r4, LOC(USB_RXCOUNT_BASE)
+    lsl r5, r2, 4
+    ldrh r4, [r4, r5]
+    bic r4, heval(MASK(USB_COUNT_RX_NUM_BLOCK) + USB_COUNT_RX_BLSIZE) // r4 = data len
+
+    // invoke rx callback
+    // r0 = USB_BASE
+    // r1 = USB_EPnR
+    // r2 = EA
+    // r3 = usb_ep_configs[EA]
+    // r4 = data len
+    ldr r5, [r3, USB_EP_CONFIG_RX_CALLBACK]
+
+    // invoke the callback at r5 (used for both TX and RX callbacks)
+  LOC(CALL_CALLBACK):
+    cmp r5, 0
+    beq LOC(DONE)
+    blx r5
+    b LOC(DONE)
+
+  LOC(CTR_IN):                                  // handle an IN transfer
+    // NOTE: CTR_TX (and this callback) does *NOT* mean that the host is asking
+    // for data and we should pump it in.
+    // It means that the host *was* asking for data and already has taken it
+    // from the TX buffer, so now we may either prepare the next chunk into the
+    // TX buffer (if we have more to send), or go on according to our state
+    // diagram (if we don't have any more data).
+
+    // CTR_TX is always set, but do a safety check anyway
+    tst r1, USB_EPR_CTR_TX
+    beq LOC(DONE)
+
+    bic r1, USB_EPR_CTR_TX // clear CTR_TX flag
+    // NOTE: Actually the TX callback must write r1 to EPnR, it's not
+    // done here to avoid race conditions.
+    
+    ldr r4, LOC(EP_BUFFERS)
+    mov r5, USB_EP_BUFFER_SIZEOF
+    mla r4, r5, r2, r4                          // r4 = usb_ep_buffers[EA]
+
+    ldr r6, [r4, USB_EP_BUFFER_LEN]             // r6 = remaining TX len
+    // if there is no more data to transmit, invoke the callback
+    cmp r6, 0
+    itt eq
+    // r0 = USB_BASE
+    // r1 = USB_EPnR
+    // r2 = EA
+    // r3 = usb_ep_configs[EA]
+    // r4 = usb_ep_buffers[EA]
+    ldreq r5, [r3, USB_EP_CONFIG_TX_CALLBACK]
+    beq LOC(CALL_CALLBACK)
+
+  LOC(TX_NEXT_CHUNK):                           // we have more data to send
+    ldr r5, [r4, USB_EP_BUFFER_PTR]
+    // send next chunk
+    // r0 = USB_BASE
+    // r1 = USB_EPnR
+    // r2 = EA
+    // r3 = usb_ep_configs[EA]
+    // r4 = usb_ep_buffers[EA]
+    // r5 = data to send
+    // r6 = data length
+    bl usb_send_chunk
+
+  LOC(DONE):
+    pop {{r4-r6, pc}}
+
+  LOC({USB_BASE}):          .word USB_BASE
+  LOC({USB_RXCOUNT_BASE}):  .word heval(USB_PMA_BASE + USB_COUNT_RX)
+  LOC(DEVICE_ADDRESS):      .word device_address
+  LOC(EP_CONFIGS):          .word usb_ep_configs
+  LOC(EP_BUFFERS):          .word usb_ep_buffers
+ENDFUNC // USB_LP_CAN1_RX0_Handler
+
+
+// Copy a chunk of data to the TX buffer (thus prepare it for sending on the next IN transfer)
+// NOTE: This function implements the common part of the individual data sending of 'usb_send'
+// and the continuation of transmission from 'USB_LP_CAN1_RX0_Handler', so it doesn't calculate
+// or look up everything from scratch but relies on the environment of the IRQ handler.
+// That's why it requires such an extensive setup in its arguments.
+FUNCTION(usb_send_chunk)
+    // In:  r0 = USB_BASE
+    //      r2 = EA
+    //      r3 = usb_ep_configs[EA]
+    //      r4 = usb_ep_buffers[EA]
+    //      r5 = data to send
+    //      r6 = data length
+
+    push {{r1, r2, r5, r6, r7, lr}}
+    ldrh r1, [r3, USB_EP_CONFIG_TXBUF_SIZE]     // r1 = txbuf max size
+    mov r7, r6                                  // r7 = data length (will need later for the remaining length)
+    cmp r1, r6
+    it lo
+    movlo r6, r1                                // r6 = min(remaining length to write, size of TX buffer) = size of this chunk
+    sub r7, r6                                  // r7 = remaining length
+    str r7, [r4, USB_EP_BUFFER_LEN]             // write back remaining length to write after this chunk
+
+    ldr r1, [r3, USB_EP_CONFIG_TXBUF_ADDR]      // r1 = TX buffer
+    
+    lsl r2, 2                                   // r2 = count*4, an offset to the 4-byte EPnR registers, and
+                                                // its 'LSL 2' is an offset to the 16-byte Endpoint Descriptors in the PMA
+    ldr r7, LOC({USB_TXCOUNT_BASE})
+    strh r6, [r7, r2, LSL 2]                    // EP_Descriptor[EA].USB_COUNT_TX = chunk length
+  
+    // NOTE: The uC sees the PMA as hwords fluffed up to words, so we'll copy words, and move
+    // the source pointer by 2 and the dest pointer by 4 in each step.
+    add r6, 1
+    lsr r6, 1                                   // r6 = length in words
+    b LOC(CHECK_NEXT)
+  LOC(COPY_DATA):
+    ldrh r7, [r5]                               // r7 = word from source
+    add r5, 2                                   // step source by 2
+    str r7, [r1]                                // dword at dest = r7
+    add r1, 4                                   // step dest by 4
+  LOC(CHECK_NEXT):
+    subs r6, 1
+    bcs LOC(COPY_DATA)
+    str r5, [r4, USB_EP_BUFFER_PTR]             // usb_ep_buffers[EA].BUFFER_PTR = the remaining data ptr
+
+    // set STAT_TX to VALID and clear CTR_TX
+    // NOTE: If CTR_TX remained set, then the ongoing IRQ would hit again immediately, and not just after this chunk has been transferred.
+    ldr r7, [r0, r2]                            // r7 = USB_EPnR[EA]
+    orr r7, USB_EPR_CTR_RX                      // don't clear CTR_RX
+    bic r7, heval(USB_EPR_DTOG_RX + MASK(USB_EPR_STAT_RX))  // don't toggle STAT_RX
+    bic r7, USB_EPR_CTR_TX                      // clear CTR_TX
+    bic r7, USB_EPR_DTOG_TX                     // don't toggle DTOG_TX
+    eor r7, USB_EPR_EP_TX_VALID                 // STAT_TX = VALID
+    str r7, [r0, r2]                            // USB_EPnR[EA] = r7
+
+    pop {{r1, r2, r5, r6, r7, pc}}
+
+  LOC({USB_TXCOUNT_BASE}):  .word heval(USB_PMA_BASE + USB_COUNT_TX)
+  LOC(EP_CONFIGS):          .word usb_ep_configs
+  LOC(EP_BUFFERS):          .word usb_ep_buffers
+ENDFUNC // usb_send_chunk
+
+
+// Schedule custom data to be transmitted
+FUNCTION(usb_send)
+    // In:  r2 = EA
+    //      r5 = data ptr
+    //      r6 = data count
+    // Out: r0 = status (0=ok, other=error)
+    push {{r3, r4, lr}}
+    ldr r4, LOC(EP_BUFFERS)
+    mov r0, USB_EP_BUFFER_SIZEOF
+    mla r4, r2, r0, r4      // r4 = usb_ep_buffers[EA]
+
+    //ldr r3, [r4, USB_EP_BUFFER_LEN]
+    //cmp r3, 0
+    //itt ne
+    //movne r0, 1     // status = ERROR: there is a transmission in progress
+    //bne LOC(DONE)
+
+    ldr r3, LOC(EP_CONFIGS)
+    mov r0, USB_EP_CONFIG_SIZEOF
+    mla r3, r2, r0, r3      // r3 = usb_ep_configs[EA]
+
+    ldr r0, LOC({USB_BASE})
+
+    // In: *r0 = USB_BASE
+    //     *r2 = EA
+    //     *r3 = usb_ep_configs[EA]
+    //     *r4 = usb_ep_buffers[EA]
+    //     *r5 = data to send
+    //     *r6 = data length
+    bl usb_send_chunk
+    mov r0, 0       // status = OK
+    
+  LOC(DONE):
+    pop {{r3, r4, pc}}
+
+  LOC({USB_BASE}):          .word USB_BASE
+  LOC(EP_CONFIGS):          .word usb_ep_configs
+  LOC(EP_BUFFERS):          .word usb_ep_buffers
+ENDFUNC // usb_send
+
+
+// --------------------------------------------------------------------------
+// CALLBACKS FOR EP0
+
+FUNCTION(usb_ep0_tx_complete)    // dev -> host
+    // In:  r0 = USB_BASE
+    //      r1 = USB_EPnR
+    //      r2 = EA
+    //      r3 = usb_ep_configs[EA]
+    //      r4 = usb_ep_buffers[EA]
+    push {{r1, r2, lr}}
+
+    // set EP0R to enable reception
+    // NOTE: EP0 is half-duplex, so enable RX only here
+    bic r1, USB_EPR_DTOG_TX // don't toggle DTOG_TX
+    bic r1, USB_EPR_DTOG_RX // don't toggle DTOG_RX
+    eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
+    eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
+    str r1, [r0, USB_EP0R]
+
+    // set DADDR if it hasn't been already done
+    // NOTE: The response to SET_ADDRESS shall be sent as ADDR=0, so
+    // we may only set it when that sending completed.
+    ldr r1, LOC({DEVICE_ADDRESS})
+    ldr r2, [r1]
+    cmp r2, 0
+    ittt ne
+    strne r2, [r0, USB_DADDR] // set device addr
+    movne r2, 0
+    strne r2, [r1]
+
+    // TODO: process ep0 IN requests (device -> host) if we have any
+
+    pop {{r1, r2, pc}}
+
+  LOC(DEVICE_ADDRESS):      .word device_address
+ENDFUNC // usb_ep0_tx_complete
+
+
+FUNCTION(usb_ep0_rx_notify)    // host -> dev
+    // In:  r0 = USB_BASE
+    //      r1 = USB_EP0R
+    //      r2 = EA
+    //      r4 = data len
+    push {{r0, r1, r2, r3, lr}}
+
+    // separate the 0-length 'Status' packets
+    cmp r4, 0
+    beq LOC(STATUS_PACKET)
+
+    // write back the CTR_RX-cleared value to USB_EP0R
+    // NOTE: EP0 is half-duplex, so let STAT_RX set to valid by the TX callback we get for tha ACK we'll send
+    bic r1, heval(USB_EPR_DTOG_TX + MASK(USB_EPR_STAT_TX)) // don't toggle the STAT and DTOG bits
+    bic r1, heval(USB_EPR_DTOG_RX + MASK(USB_EPR_STAT_RX)) // don't toggle the STAT and DTOG bits
+    str r1, [r0, USB_EP0R]
+
+    ldr r1, [r0, USB_EP0R]                      // read it back to get the actual value
+    tst r1, USB_EPR_SETUP                       // separate OUT and SETUP transfers
+    beq LOC(NOT_SETUP)
+
+  LOC(SETUP):
+    // ---- handle the SETUP transfer ----
+    ldr r0, LOC({USB_EP0_BUF})
+    ldrh r2, [r0, USB_PKT_SETUP_REQTYPE]
+    ldrh r3, [r0, USB_PKT_SETUP_LENGTH]         // for the GET_* requests
+
+    cmp r2, USB_REQ_SET_ADDRESS
+    beq LOC(SET_ADDRESS)
+    cmp r2, USB_REQ_GET_DEV_STATUS
+    beq LOC(GET_STATUS)
+    cmp r2, USB_REQ_GET_DESCRIPTOR
+    beq LOC(GET_DESCRIPTOR)
+    cmp r2, USB_REQ_SET_CONFIGURATION
+    beq LOC(SET_CONFIGURATION)
+    cmp r2, USB_REQ_GET_CONFIGURATION
+    beq LOC(GET_CONFIGURATION)
+
+    bkpt 4                                      // FIXME: unhandled SETUP req
+    b LOC(SEND_EMPTY)
+
+  LOC(NOT_SETUP):
+    // ---- handle the OUT transfer ----
+    // TODO: implement, if there is any
+    // now only fallback to SEND_EMPTY
+
+  LOC(SEND_EMPTY):
+    // generic fallback: send a 0-byte reply
+    mov r6, 0 // data len
+    mov r2, 0 // endpoint
+    bl usb_send
+
+  LOC(DONE):
+    pop {{r0, r1, r2, r3, pc}}
+
+  LOC(STATUS_PACKET):                           // 0-length Status packet
+    // set EP0R to enable reception
+    bic r1, USB_EPR_DTOG_TX // don't toggle DTOG_TX
+    bic r1, USB_EPR_DTOG_RX // don't toggle DTOG_RX
+    eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
+    eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
+    str r1, [r0, USB_EP0R]
+    b LOC(DONE)
+
+  LOC(SET_ADDRESS):
+    ldrb r3, [r0, USB_PKT_SETUP_VALUE_L]
+    orr r3, USB_DADDR_EF
+    ldr r1, LOC({DEVICE_ADDRESS})
+    str r3, [r1]
+    // this SETUP must be ACKed from ADDR=0, so only store it but don't set it yet
+    b LOC(SEND_EMPTY)
+
+  LOC(GET_STATUS):
+    // send a max-2-byte reply from 'device_status'
+    ldr r5, LOC(DEVICE_STATUS)
+    mov r6, 2 // data len
+    cmp r3, r6
+    it lo
+    movlo r6, r3
+    mov r2, 0 // endpoint
+    bl usb_send
+    b LOC(DONE)
+
+  LOC(GET_DESCRIPTOR):
+    ldrb r2, [r0, USB_PKT_SETUP_VALUE_H]
+    cmp r2, USB_DESC_TYPE_DEVICE
+    beq LOC(GET_DESCRIPTOR_DEVICE)
+    cmp r2, USB_DESC_TYPE_CFG
+    beq LOC(GET_DESCRIPTOR_CFG)
+    cmp r2, USB_DESC_TYPE_STR
+    beq LOC(GET_DESCRIPTOR_STR)
+
+    bkpt 5  // FIXME: unhandled descriptor type
+    b LOC(SEND_EMPTY)
+
+  LOC(GET_DESCRIPTOR_DEVICE):
+    ldr r5, LOC(DESC_DEVICE)
+    mov r6, usb_descriptor_device_end - usb_descriptor_device
+    cmp r3, r6
+    it lo
+    movlo r6, r3
+    mov r2, 0 // endpoint
+    bl usb_send
+    b LOC(DONE)
+
+  LOC(GET_DESCRIPTOR_CFG):
+    ldr r5, LOC(DESC_CONFIG)
+    mov r6, usb_config_total_end - usb_descriptor_config // data len
+    cmp r3, r6
+    it lo
+    movlo r6, r3
+    mov r2, 0 // endpoint
+    bl usb_send
+    b LOC(DONE)
+
+  LOC(GET_DESCRIPTOR_STR):
+    ldrb r6, [r0, USB_PKT_SETUP_VALUE_L]
+    lsl r6, 2
+    cmp r6, (usb_strings_end - usb_strings)
+    itt hs
+    movhs r6, 0 // data len
+    bhs LOC(GET_DESCRIPTOR_STR_DONE)
+    ldr r5, LOC(USB_STRINGS_TABLE)
+    ldr r5, [r5, r6] // data ptr
+    ldrb r6, [r5] // data len
+    cmp r3, r6
+    it lo
+    movlo r6, r3
+  LOC(GET_DESCRIPTOR_STR_DONE):
+    mov r2, 0 // endpoint
+    bl usb_send
+    b LOC(DONE)
+
+  LOC(SET_CONFIGURATION):
+    ldrb r6, [r0, USB_PKT_SETUP_VALUE_L]
+    ldr r5, LOC(CURRENT_CONFIG)
+    strb r6, [r5]
+    b LOC(SEND_EMPTY)
+
+  LOC(GET_CONFIGURATION):
+    ldr r5, LOC(CURRENT_CONFIG) // data ptr
+    mov r6, 1 // data len
+    mov r2, 0 // endpoint
+    bl usb_send
+    b LOC(DONE)
+
+  LOC({USB_BASE}):          .word USB_BASE
+  LOC({USB_EP0_BUF}):       .word USB_EP0_BUF
+
+  LOC(DESC_DEVICE):         .word usb_descriptor_device
+  LOC(DESC_CONFIG):         .word usb_descriptor_config
+  LOC(USB_STRINGS_TABLE):   .word usb_strings
+  LOC(DEVICE_ADDRESS):      .word device_address
+  LOC(CURRENT_CONFIG):      .word current_config
+  LOC(DEVICE_STATUS):       .word device_status
+ENDFUNC // usb_ep0_rx_notify
+
+
+// --------------------------------------------------------------------------
+// CALLBACKS FOR EP1
+
+// --------------------------------------------------------------------------
+    .section .rodata
+
+usb_descriptor_device:      // 0x12 bytes
+    .byte usb_descriptor_device_end - usb_descriptor_device // bLength
+    .byte USB_DESC_TYPE_DEVICE                              // bDescriptorType
+    .byte 0x10                                              // bcdUSB.L
+    .byte 0x01                                              // bcdUSB.H
+    .byte 0                                                 // bDeviceClass
+    .byte 0                                                 // bDeviceSubClass
+    .byte 0                                                 // bDeviceProtocol
+    .byte USB_EP0_BUFSIZE                                   // bMaxPacketSize0
+    .byte heval(USB_VENDOR_ID & 0xff)                       // idVendor.L
+    .byte heval(USB_VENDOR_ID >> 8)                         // idVendor.H
+    .byte heval(USB_PRODUCT_ID & 0xff)                      // idProduct.L
+    .byte heval(USB_PRODUCT_ID >> 8)                        // idProduct.H
+    .byte 0x00                                              // bcdDevice.L
+    .byte 0x01                                              // bcdDevice.H
+    .byte 1                                                 // iManufacturer
+    .byte 2                                                 // iProduct
+    .byte 3                                                 // iSerialNumber
+    .byte 1                                                 // bNumConfiguration
+usb_descriptor_device_end:
+
+usb_string_0:                               // = lang id
+    .byte usb_string_1 - usb_string_0       // bLength
+    .byte USB_DESC_TYPE_STR                 // bDescriptorType
+    .hword 0x0409                           // en-US
+usb_string_1:                               // = manufacturer
+    .byte usb_string_2 - usb_string_1 - 2   // bLength
+    .byte USB_DESC_TYPE_STR                 // bDescriptorType
+    .string16 "gsimon75"
+usb_string_2:                               // = product
+    .byte usb_string_3 - usb_string_2 - 2   // bLength
+    .byte USB_DESC_TYPE_STR                 // bDescriptorType
+    .string16 "STM32 Scope"
+usb_string_3:                               // = serial
+    .byte usb_string_4 - usb_string_3 - 2   // bLength
+    .byte USB_DESC_TYPE_STR                 // bDescriptorType
+    .string16 "1029384756"
+usb_string_4:                               // = end
+
+    .align
+usb_strings:
+    .word usb_string_0
+    .word usb_string_1
+    .word usb_string_2
+    .word usb_string_3
+usb_strings_end:
+
+    .align
+usb_descriptor_config:
+    .byte usb_descriptor_config_end - usb_descriptor_config // bLength
+    .byte USB_DESC_TYPE_CFG                                 // bDescriptorType
+    .hword usb_config_total_end - usb_descriptor_config     // wTotalLength
+    .byte 1                                                 // bNumInterfaces
+    .byte 0                                                 // bConfigurationValue
+    .byte 0                                                 // iConfiguration
+    .byte 0x80                                              // bmAttributes
+    .byte 50                                                // bMaxPower
+usb_descriptor_config_end:
+
+usb_descriptor_iface:
+    .byte usb_descriptor_iface_end - usb_descriptor_iface   // bLength
+    .byte USB_DESC_TYPE_IFACE                               // bDescriptorType
+    .byte 0                                                 // bInterfaceNumber
+    .byte 0                                                 // bAlternateSetting
+    .byte 2                                                 // bNumEndpoints
+    .byte USB_CLASS_VENDOR_SPEC // USB_CLASS_COMM                                    // bInterfaceClass
+    .byte 0                                                 // bInterfaceSubClass
+    .byte 0                                                 // bInterfaceProtocol
+    .byte 0                                                 // iInterface
+usb_descriptor_iface_end:
+
+usb_descriptor_ep1:
+    .byte usb_descriptor_ep1_end - usb_descriptor_ep1       // bLength
+    .byte USB_DESC_TYPE_EP                                  // bDescriptorType
+    .byte 0x01                                              // bEndpointAddress = 1 OUT
+    .byte 0x02                                              // bmAttributes
+    .hword USB_EP1_RX_BUFSIZE                               // wMaxPacketSize
+    .byte 0                                                 // bInterval
+usb_descriptor_ep1_end:
+
+usb_descriptor_ep2:
+    .byte usb_descriptor_ep2_end - usb_descriptor_ep2       // bLength
+    .byte USB_DESC_TYPE_EP                                  // bDescriptorType
+    .byte 0x81                                              // bEndpointAddress = 1 IN
+    .byte 0x02                                              // bmAttributes
+    .hword USB_EP1_TX_BUFSIZE                               // wMaxPacketSize
+    .byte 0                                                 // bInterval
+usb_descriptor_ep2_end:
+
+usb_config_total_end:
+
+usb_ep_configs:
+    // ---- EP0 ----
+    .word USB_EPR_INIT(USB_EPR_EP_CONTROL, 0, 0)    // USB_EP_CONFIG_EPR
+    .word USB_EP0_BUF                               // USB_EP_CONFIG_TXBUF_ADDR
+    .word USB_EP0_BUF                               // USB_EP_CONFIG_RXBUF_ADDR
+    .hword USB_EP0_BUFSIZE                          // USB_EP_CONFIG_TXBUF_SIZE
+    .hword USB_EP0_BUFSIZE                          // USB_EP_CONFIG_RXBUF_SIZE
+    .word usb_ep0_tx_complete                       // USB_EP_CONFIG_TX_CALLBACK
+    .word usb_ep0_rx_notify                         // USB_EP_CONFIG_RX_CALLBACK
+    // ---- EP1 ----
+    .word USB_EPR_INIT(USB_EPR_EP_BULK, 0, 1)       // USB_EP_CONFIG_EPR
+    .word USB_EP1_TX_BUF                            // USB_EP_CONFIG_TXBUF_ADDR
+    .word USB_EP1_RX_BUF                            // USB_EP_CONFIG_RXBUF_ADDR
+    .hword USB_EP1_TX_BUFSIZE                       // USB_EP_CONFIG_TXBUF_SIZE
+    .hword USB_EP1_RX_BUFSIZE                       // USB_EP_CONFIG_RXBUF_SIZE
+    .word usb_ep1_tx_complete                       // USB_EP_CONFIG_TX_CALLBACK
+    .word usb_ep1_rx_notify                         // USB_EP_CONFIG_RX_CALLBACK
+usb_ep_configs_end:
+
+
+// --------------------------------------------------------------------------
+    .section .usb_pma
+
+/* NOTE: PMA is 0x100 halfwords (16-bit each), which the USB sees as contiguous memory, but the uC sees it as fluffed up to
+    words (32-bit each), with the high half as 0. This section is from the viewpoint of the uC, so we store here words instead
+    of halfwords. But keep in mind that the symbols defined here will reflect the addresses from uC viewpoint as well!
+    For example, each EP descriptor consists of 4 halfwords, so we allocate 4 words for each. */
+
+PMA_BEGIN: // starts with Buffer Table
+    .global PMA_BUFFER_TABLE
+PMA_BUFFER_TABLE:   .skip 16 * 2
+
+    // The single buffer for EP0
+    .global USB_EP0_BUF
+USB_EP0_BUF:        .skip USB_EP0_BUFSIZE*2
+    .global USB_EP1_RX_BUF
+USB_EP1_RX_BUF:     .skip USB_EP1_RX_BUFSIZE*2
+    .global USB_EP1_TX_BUF
+USB_EP1_TX_BUF:     .skip USB_EP1_TX_BUFSIZE*2
+
+
+// --------------------------------------------------------------------------
+    .section .bss
+
+device_address  .word 0
+device_status   .word 0 // bit1 = remote wakeup, bit0=self-powered
+current_config  .byte 0
+
+    .align 4
+    .global usb_ep_buffers
+usb_ep_buffers:
+    // ---- EP0 ----
+    .word 0     // USB_EP_BUFFER_PTR
+    .word 0     // USB_EP_BUFFER_LEN
+    // ---- EP1 ----
+    .word 0     // USB_EP_BUFFER_PTR
+    .word 0     // USB_EP_BUFFER_LEN
+usb_ep_buffers_end:
+
+// vim: set ts=4 sw=4 et:

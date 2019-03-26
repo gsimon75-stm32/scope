@@ -1,0 +1,4 @@
+arm-none-eabi-objdump -d -M force-thumb,reg-names-std blinky_flash.img.elf
+
+arm-none-eabi-objcopy --change-section-lma .dummy=0x08000000 --change-section-vma .dummy=0x08000000 q.elf generic_boot20_pc13.elf
+

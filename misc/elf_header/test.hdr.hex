@@ -1,0 +1,362 @@
+# File Header
+
+test.elf:     file format elf32-littlearm
+architecture: arm, flags 0x00000002: EXEC_P
+start address 0x08000193
+private flags = 5000200: [Version5 EABI] [soft-float ABI]
+
+0000 EI_MAG0..3		7f 45 4c 46		= magic
+0004 EI_CLASS		01			= 32 bit
+0005 EI_DATA		01			= little endian
+0006 EI_VERSION		01
+0007 EI_OSABI		00			= none abi
+0008 EI_ABIVERSION	00
+0009 EI_PAD		00 00 00 00 00 00 00
+0010 e_type		02 00			= ET_EXEC
+0012 e_machine		28 00			= arm
+0014 e_version		01 00 00 00
+0018 e_entry		93 01 00 08		= run entry point
+001c e_phoff		34 00 00 00		-> Program Header
+0020 e_shoff		e4 08 00 00		-> Section Header
+0024 e_flags		00 02 00 05
+0028 e_ehsize		34 00			size of this header
+002a e_phentsize	20 00			size of one Program Header entry
+002c e_phnum		03 00			number of Program Header entries
+002e e_shentsize	28 00			size of one Section Header entry
+0030 e_shnum		08 00			number of Section Header entries
+0032 e_shstrndx		07 00			index of Section Header entry that contains the section names
+
+
+# Program Header
+
+## Entry 0
+
+LOAD off    0x00000094 vaddr 0x08000000 paddr 0x08000000 align 2**2 filesz 0x00000790 memsz 0x00000790 flags r-x
+
+0034 p_type		01 00 00 00		= PT_LOAD
+0038 p_offset		94 00 00 00		= offset in file image -> Segment 0
+003c p_vaddr		00 00 00 08		= virtual address in memory
+0040 p_paddr		00 00 00 08		= physical address
+0044 p_filesz		90 07 00 00		= size in file
+0048 p_memsz		90 07 00 00		= size in memory
+004c p_flags		05 00 00 00		= read(4) | exec(1)
+0050 p_align		04 00 00 00
+
+## Entry 1
+
+LOAD off    0x00000824 vaddr 0x20000400 paddr 0x08000790 align 2**2 filesz 0x00000018 memsz 0x00000024 flags rw-
+
+0054 p_type		01 00 00 00		= PT_LOAD
+0058 p_offset		24 08 00 00		= offset in file image -> Segment 1
+005c p_vaddr		00 04 00 20		= virtual address in memory
+0060 p_paddr		90 07 00 08		= physical address
+0064 p_filesz		18 00 00 00		= size in file
+0068 p_memsz		24 00 00 00		= size in memory
+006c p_flags		06 00 00 00		= read(4) | write(2)
+0070 p_align		04 00 00 00
+
+## Entry 2
+
+LOAD off    0x0000083c vaddr 0x20000000 paddr 0x20000000 align 2**0 filesz 0x00000000 memsz 0x00000400 flags rw-
+
+0074 p_type		01 00 00 00		= PT_LOAD
+0078 p_offset		3c 08 00 00		= offset in file image -> Segment 2
+007c p_vaddr		00 00 00 20		= virtual address in memory
+0080 p_paddr		00 00 00 20		= physical address in memory
+0084 p_filesz		00 00 00 00		= size in file
+0088 p_memsz		00 04 00 00		= size in memory
+008c p_flags		06 00 00 00		= read(4) | write(2)
+0090 p_align		01 00 00 00
+
+
+# Image of Segment 0 = Section 1: ".text"
+
+0094	00 04 00 20 93 01 00 08 f1 01 00 08
+00a0	85 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+00b0	00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00c0	f1 01 00 08 f1 01 00 08 00 00 00 00 f1 01 00 08
+00d0	59 06 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+00e0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+00f0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0100	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0110	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0120	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0130	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0140	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0150	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0160	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0170	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0180	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0190	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01a0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01b0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01c0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01d0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01e0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+01f0	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0200	f1 01 00 08 f1 01 00 08 f1 01 00 08 f1 01 00 08
+0210	f1 01 00 08 f1 01 00 08 68 46 1b 49 8d 46 00 f0
+0220	31 f8 00 f0 00 b8 68 46 20 f0 07 01 8d 46 79 b5
+0230	0f 4e 10 4c 10 4d 03 e0 00 f0 28 f8 00 f0 86 fa
+0240	11 48 85 46 a6 42 07 d2 09 4b 0c 4a 12 f8 01 1b
+0250	03 f8 01 1b 9c 42 f9 d1 09 4b 9d 42 ec d2 06 4b
+0260	00 21 07 4a 03 f8 01 1b 93 42 fb d1 e4 e7 00 bf
+0270	00 04 00 20 18 04 00 20 18 04 00 20 90 07 00 08
+0280	24 04 00 20 70 47 00 00 00 04 00 20 82 b0 32 4b
+0290	1a 68 42 f0 01 02 1a 60 00 21 99 60 1a 68 22 f0
+02a0	84 72 22 f4 80 32 1a 60 2c 4a 5a 60 1a 68 22 f4
+02b0	80 22 1a 60 d9 60 00 91 01 91 1a 68 42 f4 80 32
+02c0	1a 60 1a 46 13 68 03 f4 00 33 01 93 00 9b 01 33
+02d0	00 93 01 9b 1b b9 00 9b b3 f5 c0 6f f2 d1 1e 4b
+02e0	1b 68 13 f4 00 3f 14 bf 01 23 00 23 01 93 01 9b
+02f0	01 2b 05 d0 4f f0 00 62 19 4b 9a 60 02 b0 70 47
+0300	15 4b 9a 68 9a 60 9a 68 42 f4 00 42 9a 60 9a 68
+0310	42 f4 a0 52 9a 60 13 4a 5a 60 1a 68 42 f0 80 72
+0320	1a 60 1a 46 13 68 13 f0 00 7f fb d0 40 f2 03 72
+0330	0d 4b 1a 60 a3 f5 80 63 9a 68 22 f0 03 02 9a 60
+0340	9a 68 42 f0 02 02 9a 60 1a 46 93 68 03 f0 0c 03
+0350	08 2b fa d1 ce e7 00 bf 00 38 02 40 10 30 00 24
+0360	00 ed 00 e0 19 3c 40 05 00 3c 02 40 22 4b 9b 68
+0370	03 f0 0c 03 04 2b 15 d0 08 2b 17 d0 1b b1 1f 4a
+0380	1f 4b 1a 60 02 e0 1d 4a 1d 4b 1a 60 1a 4b 9b 68
+0390	c3 f3 03 13 1a 4a 13 44 1b 79 d9 b2 13 68 cb 40
+03a0	13 60 70 47 17 4a 16 4b 1a 60 ef e7 12 4b 59 68
+03b0	5a 68 02 f0 3f 02 11 f4 80 0f 12 d0 59 68 c1 f3
+03c0	88 11 10 4b b3 fb f2 f3 03 fb 01 f3 0a 4a 52 68
+03d0	c2 f3 01 42 01 32 52 00 b3 fb f2 f3 08 4a 13 60
+03e0	d4 e7 05 4b 59 68 c1 f3 88 11 04 4b b3 fb f2 f3
+03f0	03 fb 01 f3 ea e7 00 bf 00 38 02 40 00 24 f4 00
+0400	00 04 00 20 40 78 7d 01 00 29 51 d0 51 4b 98 42
+0410	18 d0 51 4b 98 42 1b d0 50 4b 98 42 1e d0 50 4b
+0420	98 42 21 d0 4f 4b 98 42 24 d0 4f 4b 98 42 27 d0
+0430	4e 4b 98 42 2a d0 4e 4b 98 42 2d d0 4d 4b 98 42
+0440	30 d0 70 47 4c 4a 13 6b 43 f0 01 03 13 63 70 47
+0450	49 4a 13 6b 43 f0 02 03 13 63 70 47 46 4a 13 6b
+0460	43 f0 04 03 13 63 70 47 43 4a 13 6b 43 f0 08 03
+0470	13 63 70 47 40 4a 13 6b 43 f0 10 03 13 63 70 47
+0480	3d 4a 13 6b 43 f0 20 03 13 63 70 47 3a 4a 13 6b
+0490	43 f0 40 03 13 63 70 47 37 4a 13 6b 43 f0 80 03
+04a0	13 63 70 47 34 4a 13 6b 43 f4 80 73 13 63 70 47
+04b0	28 4b 98 42 1d d0 28 4b 98 42 20 d0 27 4b 98 42
+04c0	23 d0 27 4b 98 42 26 d0 26 4b 98 42 29 d0 26 4b
+04d0	98 42 2c d0 25 4b 98 42 2f d0 25 4b 98 42 32 d0
+04e0	24 4b 98 42 ad d1 24 4a 13 6b 23 f4 80 73 13 63
+04f0	a7 e7 21 4a 13 6b 23 f0 01 03 13 63 70 47 1e 4a
+0500	13 6b 23 f0 02 03 13 63 70 47 1b 4a 13 6b 23 f0
+0510	04 03 13 63 70 47 18 4a 13 6b 23 f0 08 03 13 63
+0520	70 47 15 4a 13 6b 23 f0 10 03 13 63 70 47 12 4a
+0530	13 6b 23 f0 20 03 13 63 70 47 0f 4a 13 6b 23 f0
+0540	40 03 13 63 70 47 0c 4a 13 6b 23 f0 80 03 13 63
+0550	70 47 00 bf 00 00 02 40 00 04 02 40 00 08 02 40
+0560	00 0c 02 40 00 10 02 40 00 14 02 40 00 18 02 40
+0570	00 1c 02 40 00 20 02 40 00 38 02 40 0f 29 25 d8
+0580	f0 b4 05 68 4e 00 03 24 b4 40 e4 43 25 40 b2 40
+0590	2a 43 02 60 45 68 01 22 02 fa 01 f7 25 ea 07 05
+05a0	03 fa 01 f1 29 43 41 60 83 68 23 40 9d f8 10 10
+05b0	b1 40 0b 43 83 60 c3 68 1c 40 9d f8 14 30 03 fa
+05c0	06 f6 34 43 c4 60 10 46 f0 bc 70 47 00 20 70 47
+05d0	0f 29 1c d8 10 b4 07 29 0c d8 03 6a 89 00 0f 24
+05e0	8c 40 23 ea 04 03 02 fa 01 f1 19 43 01 62 01 20
+05f0	10 bc 70 47 44 6a a1 f1 08 03 9b 00 0f 21 99 40
+0600	24 ea 01 01 9a 40 0a 43 42 62 01 20 f0 e7 00 20
+0610	70 47 00 bf 2d e9 f0 43 83 b0 0f 4c 04 f1 40 09
+0620	01 26 02 27 4f f0 00 08 25 68 31 46 28 46 ff f7
+0630	eb fe 21 79 06 fa 01 f3 9b b2 6b 83 01 97 00 97
+0640	43 46 32 46 28 46 ff f7 99 ff 08 34 4c 45 eb d1
+0650	03 b0 bd e8 f0 83 00 bf 50 07 00 08 70 b5 82 b0
+0660	08 4c 04 f1 40 06 00 25 21 79 54 f8 08 0b 01 95
+0670	00 95 2b 46 2a 46 ff f7 81 ff b4 42 f4 d1 02 b0
+0680	70 bd 00 bf 50 07 00 08 05 4b 53 f8 30 20 03 eb
+0690	c0 03 19 79 01 23 8b 40 9b b2 13 83 70 47 00 bf
+06a0	50 07 00 08 05 4b 53 f8 30 20 03 eb c0 03 19 79
+06b0	01 23 8b 40 9b b2 53 83 70 47 00 bf 50 07 00 08
+06c0	70 b5 06 46 00 24 01 25 05 e0 20 46 ff f7 ea ff
+06d0	01 34 08 2c 07 d0 05 fa 04 f3 33 42 f5 d0 20 46
+06e0	ff f7 d2 ff f4 e7 70 bd 08 20 70 47 13 4a 13 68
+06f0	59 1c 11 60 05 2b 13 d0 0d d9 09 2b 14 d0 64 2b
+0700	16 d1 68 22 0e 4b 1a 60 0e 4a 13 68 59 1c 11 60
+0710	0d 4a 13 60 70 47 5b b9 01 22 09 4b 1a 60 70 47
+0720	01 22 09 4b 1a 60 70 47 00 22 04 4b 1a 60 70 47
+0730	0a 29 02 d9 00 22 01 4b 1a 60 70 47 18 04 00 20
+0740	1c 04 00 20 14 04 00 20 20 04 00 20 2d e9 f8 43
+0750	ff f7 ca ff 00 f1 ff 39 1c 4b 1b 68 1c 4a a2 fb
+0760	03 23 5b 09 01 3b b3 f1 80 7f 09 d2 19 4a 53 60
+0770	f0 21 19 4b 83 f8 23 10 00 23 93 60 07 23 13 60
+0780	ff f7 48 ff 4f f0 01 08 00 26 14 4c 37 46 14 4d
+0790	01 e0 2b 68 3b b9 23 68 00 2b fa d0 27 60 30 46
+07a0	ff f7 72 ff f5 e7 2f 60 30 46 ff f7 7b ff 46 44
+07b0	b8 f1 01 0f 04 d0 00 2e 08 bf 4f f0 01 08 ea e7
+07c0	b1 45 f8 d1 4f f0 ff 38 e5 e7 00 bf 00 04 00 20
+07d0	1f 85 eb 51 10 e0 00 e0 00 ed 00 e0 1c 04 00 20
+07e0	20 04 00 20 00 04 02 40 0c 00 00 00 00 04 02 40
+07f0	0e 00 00 00 00 0c 02 40 08 00 00 00 00 0c 02 40
+0800	0a 00 00 00 00 0c 02 40 0c 00 00 00 00 0c 02 40
+0810	0e 00 00 00 00 08 02 40 06 00 00 00 00 08 02 40
+0820	08 00 00 00
+
+
+# Image of Segment 1 = Section 3: ".data"
+
+0824	00 0e 27 07 00 00 00 00 00 00 00 00
+0830	01 02 03 04 06 07 08 09 ef be ad de
+
+
+# Image of Segment 2
+
+(length = 0)
+
+
+# Image of Section 5: ".comment"
+
+083c	"GCC: (FreeBSD Ports Collection for armnoneeabi) 6.4.0"
+
+
+# Image of Section 6: ".ARM.attributes"
+
+0872	      41 32 00 00 00 61 65 61 62 69 00 01 28 00  |  A2...aeabi..(.|
+0880	00 00 05 43 6f 72 74 65 78 2d 4d 33 00 06 0a 07  |...Cortex-M3....|
+0890	4d 09 02 12 04 14 01 15 01 17 03 18 01 19 01 1a  |M...............|
+08a0	01 1e 01 22 01
+
+
+# Image of Section 7: ".shstrtab"
+
+08a5	00	00				       			= ""
+08a6	01	2e 73 68 73 74 72 74 61 62 00	       			= ".shstrtab"
+08b0	0b	2e 74 65 78 74 00		       			= ".text"
+08b6	11	2e 73 74 61 63 6b 00		       			= ".stack"
+08bd	18	2e 64 61 74 61 00		       			= ".data"
+08c3	1e	2e 62 73 73 00			       			= ".bss"
+08c8	23	2e 63 6f 6d 6d 65 6e 74 00	       			= ".comment"
+08d1	2c	2e 41 52 4d 2e 61 74 74 72 69 62 75 74 65 73 00		= ".ARM.attributes"
+
+# ?alignment?
+
+08e1	00 00 00
+
+
+# Section Header
+
+
+## Entry 0
+
+08e4	sh_name		00 00 00 00		-> ""
+08e8	sh_type		00 00 00 00		= SHT_NULL
+08ec	sh_flags	00 00 00 00
+08f0	sh_addr		00 00 00 00		= virtual address
+08f4	sh_offset	00 00 00 00		= offset in file image
+08f8	sh_size		00 00 00 00		= size in file
+08fc	sh_link		00 00 00 00
+0900	sh_info		00 00 00 00
+0904	sh_addralign	00 00 00 00
+0908	sh_entsize	00 00 00 00
+
+## Entry 1
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .text         00000790  08000000  08000000  00000094  2**2 CONTENTS, ALLOC, LOAD, READONLY, CODE
+
+090c	sh_name		0b 00 00 00		-> ".text"
+0910	sh_type		01 00 00 00		= SHT_PROGBITS
+0914	sh_flags	06 00 00 00		= SHF_ALLOC | SHF_EXECINSTR
+0918	sh_addr		00 00 00 08		= virtual address
+091c	sh_offset	94 00 00 00		= offset in file image -> Segment 0 = Section 1
+0920	sh_size		90 07 00 00		= size in file
+0924	sh_link		00 00 00 00
+0928	sh_info		00 00 00 00
+092c	sh_addralign	04 00 00 00
+0930	sh_entsize	00 00 00 00
+
+## Entry 2
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  1 .stack        00000400  20000000  20000000  0000083c  2**0 ALLOC
+
+0934	sh_name		11 00 00 00		-> ".stack"
+0938	sh_type		08 00 00 00		= SHT_NOBITS (bss)
+093c	sh_flags	03 00 00 00		= SHF_WRITE | SHF_ALLOC
+0940	sh_addr		00 00 00 20		= virtual address
+0944	sh_offset	3c 08 00 00		= offset in file image -> Segment 2
+0948	sh_size		00 04 00 00		= size in file FIXME: ???
+094c	sh_link		00 00 00 00
+0950	sh_info		00 00 00 00
+0954	sh_addralign	01 00 00 00
+0958	sh_entsize	00 00 00 00
+
+## Entry 3
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  2 .data         00000018  20000400  08000790  00000824  2**2 CONTENTS, ALLOC, LOAD, DATA
+
+095c	sh_name		18 00 00 00		-> ".data"
+0960	sh_type		01 00 00 00		= SHT_PROGBITS
+0964	sh_flags	03 00 00 00		= SHF_WRITE | SHF_ALLOC
+0968	sh_addr		00 04 00 20		= virtual address
+096c	sh_offset	24 08 00 00		= offset in file image -> Segment 1 = Section 3
+0970	sh_size		18 00 00 00		= size in file
+0974	sh_link		00 00 00 00
+0978	sh_info		00 00 00 00
+097c	sh_addralign	04 00 00 00
+0980	sh_entsize	00 00 00 00
+
+## Entry 4
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  3 .bss          0000000c  20000418  080007a8  0000083c  2**2 ALLOC
+
+0984	sh_name		1e 00 00 00		-> ".bss"
+0988	sh_type		08 00 00 00		= SHT_NOBITS (bss)
+098c	sh_flags	03 00 00 00		= SHF_WRITE | SHF_ALLOC
+0990	sh_addr		18 04 00 20		= virtual address
+0994	sh_offset	3c 08 00 00		= offset in file image -> Segment 2
+0998	sh_size		0c 00 00 00		= size in file FIXME: ???
+099c	sh_link		00 00 00 00
+09a0	sh_info		00 00 00 00
+09a4	sh_addralign	04 00 00 00
+09a8	sh_entsize	00 00 00 00
+
+## Entry 5
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  4 .comment      00000036  00000000  00000000  0000083c  2**0 CONTENTS, READONLY
+
+09ac	sh_name		23 00 00 00		-> ".comment"
+09b0	sh_type		01 00 00 00		= SHT_PROGBITS
+09b4	sh_flags	30 00 00 00		= SHF_MERGE | SHF_STRINGS
+09b8	sh_addr		00 00 00 00		= virtual address
+09bc	sh_offset	3c 08 00 00		= offset in file image -> Section 5
+09c0	sh_size		36 00 00 00		= size in file
+09c4	sh_link		00 00 00 00
+09c8	sh_info		00 00 00 00
+09cc	sh_addralign	01 00 00 00
+09d0	sh_entsize	01 00 00 00
+
+## Entry 6
+
+Idx Name          Size      VMA       LMA       File off  Algn
+  5 .ARM.attributes 00000033  00000000  00000000  00000872  2**0 CONTENTS, READONLY
+
+09d4	sh_name		2c 00 00 00		-> ".ARM.attributes"
+09d8	sh_type		03 00 00 70		= ???
+09dc	sh_flags	00 00 00 00
+09e0	sh_addr		00 00 00 00		= virtual address
+09e4	sh_offset	72 08 00 00		= offset in file image -> Section 6
+09e8	sh_size		33 00 00 00		= size in file
+09ec	sh_link		00 00 00 00
+09f0	sh_info		00 00 00 00
+09f4	sh_addralign	01 00 00 00
+09f8	sh_entsize	00 00 00 00
+
+## Entry 7
+
+09fc	sh_name		01 00 00 00		-> ".shstrtab"
+0a00	sh_type		03 00 00 00		= SHT_STRTAB
+0a04	sh_flags	00 00 00 00
+0a08	sh_addr		00 00 00 00		= virtual address
+0a0c	sh_offset	a5 08 00 00		= offset in file image
+0a10	sh_size		3c 00 00 00		= size in file
+0a14	sh_link		00 00 00 00
+0a18	sh_info		00 00 00 00
+0a1c	sh_addralign	01 00 00 00
+0a20	sh_entsize	00 00 00 00
+

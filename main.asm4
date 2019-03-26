@@ -1,0 +1,646 @@
+include(stm32f10x.m4)
+include(st7789.m4)
+
+define({MAX_SAMPLES}, 2048)
+
+
+define({rADC}, r11)
+define({rDMA}, r10)
+define({rSTATE}, r9)
+define({STATE_MASK},                0xf8)
+define({STATE_IDLE},                0)
+define({STATE_WAIT_TRIG_ANALOG},    heval(1 << 3))
+define({STATE_WAIT_TRIG_DIGITAL},   heval(2 << 3))
+define({STATE_SAMPLING},            heval(3 << 3))
+define({STATE_SENDING},             heval(4 << 3))
+
+// NOTE:
+// The lower 3 bits of rSTATE mark 3 trig states: bit0=low, bit1=high, bit2=low
+// The initial state is set by the command code, the bits are checked from bit0 towards bit2
+// and a bit is set to 1 when the corresponding trig state has been accomplished.
+//
+// Thus, bit0=1 and bit1,2=0 means that the starting 'low' (bit0) is set as accomplished by
+// the command, but a high (bit1) and then a low (bit2) condition is still to be achieved,
+// meaning a falling trigger logic.
+//
+// If bit0,1=0 and bit2=1, it means that a low (bit0) and then a high (bit1) is to be
+// achieved (the final low for bit2 is already set as accomplished), so it means a rising trigger.
+//
+// If all 3 bits are 1, then all trig conditions are set as done, so that is the free running
+// 'no trigger' mode.
+
+// --------------------------------------------------------------------------
+    .section .text
+    .align(4)
+
+FUNCTION(st7789_initialise)
+    push {{lr}}
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_SLPOUT)
+    ST7789_SEND(ST7789_CMD_DISPON)
+    ST7789_SEND(ST7789_CMD_PTLON)
+
+    ST7789_SEND(ST7789_CMD_COLMOD)
+    ST7789_MODE(1)
+    ST7789_SEND(0x03)
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_MADCTL)
+    ST7789_MODE(1)
+    ST7789_SEND(0xe8)
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_CASET)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x03, 0x00, 0x82)
+    ST7789_MODE(0)
+    
+    ST7789_SEND(ST7789_CMD_RASET)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x02, 0x00, 0x81)
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_PTLAR)
+    ST7789_MODE(1)
+    ST7789_SEND(0x00, 0x1, 0x00, 0x80)
+    ST7789_MODE(0)
+    
+    pop {{pc}}
+ENDFUNC // st7789_initialise
+
+
+FUNCTION(adc_setup)
+    push {{lr}}
+
+    // set ADC prescaler
+    mov r2, 3
+    bl adc_configure
+
+    ldr r0, LOC({RCC_BASE})
+    // enable ADC1,2 and GPIOB on APB2
+    ldr r1, [r0, RCC_APB2ENR]
+    orr r1, RCC_APB2ENR_ADC1EN
+    orr r1, RCC_APB2ENR_ADC2EN
+    orr r1, RCC_APB2ENR_IOPBEN
+    str r1, [r0, RCC_APB2ENR]
+
+    // configure GPIOB1 as analog input
+    ldr r0, LOC({GPIOB_BASE})
+    ldr r1, [r0, GPIO_CRL]
+    bic r1, heval(MASK(GPIO_CRL_MODE1) | MASK(GPIO_CRL_CNF1))
+    orr r1, heval(GPIO_MODE_INPUT << GPIO_CRL_MODE1_Shift)
+    orr r1, heval(GPIO_CNF_INPUT_ANALOG << GPIO_CRL_CNF3_Shift)
+    str r1, [r0, GPIO_CRL]
+
+    // setup ADC1,2
+    ldr r12, LOC({ADC2_BASE})
+    mov r1, 0
+    str r1, [rADC, ADC_CR2]           // shut down adc1
+    str r1, [r12, ADC_CR2]            // shut down adc2
+   
+    mov r1, 0
+    str r1, [rADC, ADC_CR1]
+    str r1, [rADC, ADC_SQR1]          // ADC_SQR1_L = 0 -> 1 channel to convert
+    str r1, [rADC, ADC_SMPR2]         // sampling time = 1.5 clks -> total conversion = 14 clks
+    str r1, [r12, ADC_CR1]
+    str r1, [r12, ADC_SQR1]
+    str r1, [r12, ADC_SMPR2]
+
+    mov r1, 9                         // channel9
+    str r1, [rADC, ADC_SQR3]
+    str r1, [r12, ADC_SQR3]
+
+    // set dual mode
+    mov r1, heval(7 << ADC_CR1_DUALMOD_Shift)
+    str r1, [rADC, ADC_CR1]
+
+    // start continuous sampling
+    mov r1, heval(ADC_CR2_CONT + ADC_CR2_ADON)
+    str r1, [rADC, ADC_CR2]
+    str r1, [r12, ADC_CR2]
+
+   // wait tstab here
+    mov r2, 140
+  LOC(WAIT_TSTAB):
+    subs r2, 1
+    bne LOC(WAIT_TSTAB)
+
+    str r1, [rADC, ADC_CR2]
+    str r1, [r12, ADC_CR2]
+    pop {{pc}}
+
+  LOC({RCC_BASE}):      .word RCC_BASE
+  LOC({GPIOB_BASE}):    .word GPIOB_BASE
+  LOC({ADC2_BASE}):     .word ADC2_BASE
+ENDFUNC // adc_setup
+
+
+FUNCTION(adc_configure)
+    // In: r2 = 2 bits prescaler
+    push {{r0, r1, r3, lr}}
+    // set ADC prescaler
+    ldr r0, LOC({RCC_BASE})
+    ldr r1, [r0, RCC_CFGR]
+    mov r3, MASK(RCC_CFGR_ADCPRE)
+    bic r1, r3
+    lsl r3, r2, RCC_CFGR_ADCPRE_Shift
+    orr r1, r3
+    str r1, [r0, RCC_CFGR]
+    pop {{r0, r1, r3, pc}}
+  LOC({RCC_BASE}):      .word RCC_BASE
+ENDFUNC // adc_configure
+
+
+FUNCTION(display_samples)
+    push {{r0-r7, lr}}
+    mov r1, 0
+    mov r3, 0x7f
+    mov r2, 0
+    mov r4, 0x7f
+    bl st7789_setarea
+
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    mov r3, 0   // pixel buffer
+
+    ldr r5, LOC({SAMPLES})  // start of source
+    add r6, r5, heval(2 * 128) // end of source
+
+  LOC(NEXT_COLUMN):
+    ldrh r7, [r5]  // y
+    lsr r7, 5
+
+    mov r2, 0   // loop y
+  LOC(LOOP_Y):
+
+    cmp r2, 0x40
+    it eq
+    orreq r3, 0x0f0
+
+    cmp r2, r7
+    itt eq
+    moveq r0, 0xfff
+    orreq r3, r0
+
+    // handle pixel
+    tst r3, 0x80000000
+    ittt eq
+    lsleq r3, 12
+    orreq r3, 0x80000000
+    beq LOC(PROCEED)
+    lsr r0, r3, 16
+    bl st7789_send
+    lsr r0, r3, 8
+    bl st7789_send
+    mov r0, r3
+    bl st7789_send
+    mov r3, 0
+  LOC(PROCEED):
+
+    add r2, 1
+    cmp r2, 0x80
+    blo LOC(LOOP_Y)
+
+    //add r5, 1
+    add r5, 2
+    cmp r5, r6
+    blo LOC(NEXT_COLUMN)
+
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_NOP)
+    pop {{r0-r7, pc}}
+
+  LOC({SAMPLES}):           .word samples
+ENDFUNC // display_samples
+
+
+FUNCTION(tim2_setup)
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC({RCC_BASE})
+
+    // enable TIM2 on APB1
+    ldr r1, [r0, RCC_APB1ENR]
+    orr r1, RCC_APB1ENR_TIM2EN
+    str r1, [r0, RCC_APB1ENR]
+
+    ldr r0, LOC({GPIOA_BASE})
+
+    // configure GPIOA15 as alternative push-pull output 50MHz (TIM2_CH1)
+    ldr r1, [r0, GPIO_CRH]
+    bic r1, heval(MASK(GPIO_CRH_MODE15) | MASK(GPIO_CRH_CNF15))
+    orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE15_Shift)
+    orr r1, heval(GPIO_CNF_ALTERNATE_PP << GPIO_CRH_CNF15_Shift)
+
+    // configure TIM2 pins to partially alternate location -> CH1 to PA15
+    ldr r0, LOC({AFIO_BASE})
+    ldr r1, [r0, AFIO_MAPR]
+    bic r1, MASK(AFIO_MAPR_TIM2_REMAP)
+    orr r1, AFIO_MAPR_TIM2_REMAP_PARTIALREMAP1
+    str r1, [r0, AFIO_MAPR]
+
+    // set up TIM2 for a 10kHz 1/4 duty cycle square wave on its Channel 1
+    ldr r0, LOC({TIM2_BASE})
+    mov r1, 0
+    str r1, [r0, TIM_CR1]   // disable the timer
+    str r1, [r0, TIM_CNT]   // reset to zero
+    str r1, [r0, TIM_PSC]   // prescaler=0 (16 bit divisor value will be more than enough)
+    str r1, [r0, TIM_DIER]
+    mov r1, 7200            // 10kHz: 72MHz/10kHz = 7200
+    str r1, [r0, TIM_ARR]
+    mov r1, 1800            // 7200 * 1/4 = 1800
+    str r1, [r0, TIM_CCR1]
+
+    ldr r1, [r0, TIM_CCMR1]
+    lsr r1, 16              // clear bit0..15
+    lsl r1, 16
+    orr r1, heval(6 << TIM_CCMR1_OC1M_Shift) // TODO: ?TIM_CCMR1_OC1FE?
+    str r1, [r0, TIM_CCMR1]
+
+    ldr r1, [r0, TIM_CCER]
+    bic r1, TIM_CCER_CC1P
+    orr r1, TIM_CCER_CC1E
+    str r1, [r0, TIM_CCER]
+
+    // enable the timer
+    mov r1, heval(TIM_CR1_URS + TIM_CR1_CEN)
+    str r1, [r0, TIM_CR1]
+    pop {{r0, r1, r2, pc}}
+
+  LOC({RCC_BASE}):          .word RCC_BASE
+  LOC({GPIOA_BASE}):        .word GPIOA_BASE
+  LOC({AFIO_BASE}):         .word AFIO_BASE
+  LOC({TIM2_BASE}):         .word TIM2_BASE
+ENDFUNC // tim2_setup
+
+
+FUNCTION(main)
+    // enable interrupts
+    ldr r0, LOC({NVIC_BASE})
+    ldr r1, [r0, NVIC_ISER]
+    orr r1, heval((1 << IRQ_DMA1_Channel1) + (1 << IRQ_DMA1_Channel5))
+    str r1, [r0, NVIC_ISER]
+
+    // set up peripherals
+    ldr r0, LOC({RCC_BASE})
+
+    // enable TIM1, GPIOA,C on APB2
+    ldr r1, [r0, RCC_APB2ENR]
+    orr r1, RCC_APB2ENR_IOPAEN
+    orr r1, RCC_APB2ENR_IOPCEN
+    orr r1, RCC_APB2ENR_TIM1EN
+    str r1, [r0, RCC_APB2ENR]
+
+    // enable DMA1
+    ldr r1, [r0, RCC_AHBENR]
+    orr r1, RCC_AHBENR_DMA1EN
+    str r1, [r0, RCC_AHBENR]
+
+    // configure GPIOC as push-pull output 2MHz
+    ldr r0, LOC({GPIOC_BASE})
+    ldr r1, [r0, GPIO_CRH]
+    bic r1, heval(MASK(GPIO_CRH_MODE13) | MASK(GPIO_CRH_CNF13))
+    orr r1, heval(2 << GPIO_CRH_MODE13_Shift) // output <= 2MHz
+    str r1, [r0, GPIO_CRH]
+
+    // configure GPIOA0-7 as floating input
+    ldr r0, LOC({GPIOA_BASE})
+    mov r1, 0x4444
+    movt r1, 0x4444
+    str r1, [r0, GPIO_CRL]
+
+    bl tim2_setup
+
+    bl usb_hw_setup
+    bl st7789_setup
+    bl st7789_initialise
+    
+    ldr rADC, LOC({ADC1_BASE})
+    ldr rDMA, LOC({DMA1_BASE})
+
+    bl adc_setup
+
+    cpsie i   // we may enable IRQs, because the transfer will be done by DMA
+    
+    // setup DMA addresses
+    mov r0, 0                                       // disable channel1
+    str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
+    add r0, rADC, ADC_DR
+    str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CPAR]
+    ldr r0, LOC({SAMPLES})
+    str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
+    mov r0, MAX_SAMPLES
+    str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
+
+    mov r0, 0                                       // disable channel5
+    str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+    ldr r0, LOC(GPIOA_IDR)
+    str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CPAR]
+    ldr r0, LOC({SAMPLES})
+    str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
+    mov r0, MAX_SAMPLES
+    str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
+
+    mov r0, heval(DMA_IR_GIF1 + DMA_IR_GIF5)
+    str r0, [rDMA, DMA_IFCR]
+
+    mov rSTATE, STATE_IDLE
+
+  LOC(FOREVER):
+    and r0, rSTATE, STATE_MASK
+    cmp r0, STATE_IDLE
+    beq LOC(DO_IDLE)
+
+    cmp r0, STATE_WAIT_TRIG_ANALOG
+    beq LOC(WAIT_TRIG_ANALOG)
+    cmp r0, STATE_WAIT_TRIG_DIGITAL
+    beq LOC(WAIT_TRIG_DIGITAL)
+    
+    cmp r0, STATE_SAMPLING
+    beq LOC(DO_SAMPLING)
+
+    cmp r0, STATE_SENDING
+    beq LOC(DO_SENDING)
+    
+    // bkpt 1   // should never reach here
+    b LOC(FOREVER)
+
+  LOC(DO_IDLE): // wait for incoming command (usb_ep1_rx_complete)
+  LOC(DO_SAMPLING): // wait for DMA to finish (DMA1_Channel[15]_Handler)
+  LOC(DO_SENDING): // wait until all data is sent (usb_ep1_tx_complete)
+    WFE
+    b LOC(FOREVER)
+
+  LOC(WAIT_TRIG_ANALOG):
+    ldr r0, [rADC, ADC_SR]
+    tst r0, ADC_SR_EOC
+    beq LOC(FOREVER)    // sample not yet ready
+    ldrh r0, [rADC, ADC_DR]
+    ldr r12, LOC({TRIG_LEVEL})
+    ldrh r12, [r12]
+    cmp r0, r12
+    ite lo
+    movlo r0, 0
+    movhs r0, 1
+    b LOC(COMMON_CHECK_TRIG)
+
+  LOC(WAIT_TRIG_DIGITAL):
+    ldr r0, LOC({GPIOA_BASE})
+    ldrh r0, [r0, GPIO_IDR]
+    and r0, 0x01    // trig source is GPIOA0
+    b LOC(COMMON_CHECK_TRIG)
+
+  LOC(COMMON_CHECK_TRIG): // in: r0 = trig condition: 0=low, other=high
+    tst rSTATE, 0x01
+    beq LOC(WAIT_TRIG_1)
+    tst rSTATE, 0x02
+    beq LOC(WAIT_TRIG_2)
+    tst rSTATE, 0x04
+    beq LOC(WAIT_TRIG_3)
+    // trig condition met, start sampling
+    mov rSTATE, STATE_SAMPLING
+    ldr r0, LOC(COMMAND)
+    ldrb r0, [r0]
+    cmp r0, 'A'
+    beq LOC(START_SAMPLING_ANALOG)
+    cmp r0, 'D'
+    beq LOC(START_SAMPLING_DIGITAL)
+    b LOC(FOREVER)
+  LOC(WAIT_TRIG_1):  // wait for low
+    cmp r0, 0
+    it eq
+    orreq rSTATE, 0x01
+    b LOC(FOREVER)
+  LOC(WAIT_TRIG_2):  // wait for high
+    cmp r0, 0
+    it ne
+    orrne rSTATE, 0x02
+    b LOC(FOREVER)
+  LOC(WAIT_TRIG_3):  // wait for low
+    cmp r0, 0
+    it eq
+    orreq rSTATE, 0x04
+    b LOC(FOREVER)
+
+  LOC(START_SAMPLING_ANALOG):
+    // continue sampling w/ dma
+    mov r1, heval(ADC_CR2_CONT + ADC_CR2_ADON + ADC_CR2_DMA)
+    str r1, [rADC, ADC_CR2]
+    b LOC(FOREVER)
+  
+  LOC(START_SAMPLING_DIGITAL):
+    mov r0, heval(TIM_CR1_URS + TIM_CR1_CEN)
+    ldr r1, LOC({TIM1_BASE})
+    str r0, [r1, TIM_CR1]   // enable the timer
+    b LOC(FOREVER)
+
+  LOC({NVIC_BASE}):         .word NVIC_BASE
+  LOC({RCC_BASE}):          .word RCC_BASE
+  LOC({GPIOA_BASE}):        .word GPIOA_BASE
+  LOC({GPIOC_BASE}):        .word GPIOC_BASE
+  LOC({ADC1_BASE}):         .word ADC1_BASE
+  LOC({TIM1_BASE}):         .word TIM1_BASE
+  LOC({DMA1_BASE}):         .word DMA1_BASE
+  
+  LOC({TRIG_LEVEL}):        .word trig_level
+  LOC(COMMAND):             .word command
+  LOC({SAMPLES}):           .word samples
+  LOC(GPIOA_IDR):           .word heval(GPIOA_BASE + GPIO_IDR)
+  LOC(USB_EP_BUFFERS):      .word usb_ep_buffers
+
+  LOC(TICK):                .word heval(SysTick_BASE + SysTick_VAL)
+ENDFUNC // main
+
+
+FUNCTION(DMA1_Channel1_Handler)
+    push {{r5, r6, lr}}
+    mov r0, 0
+    str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]  // disable channel1
+    mov r0, DMA_IR_GIF1        // clear irq flags
+    str r0, [rDMA, DMA_IFCR]
+    bl display_samples
+    b DMA1_Channel_1_5_Common
+ENDFUNC // DMA1_Channel1_Handler
+
+FUNCTION(DMA1_Channel5_Handler)
+    push {{r5, r6, lr}}
+    mov r0, 0
+    str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]  // disable channel5
+    mov r0, DMA_IR_GIF5        // clear irq flags
+    str r0, [rDMA, DMA_IFCR]
+    b DMA1_Channel_1_5_Common
+ENDFUNC // DMA1_Channel5_Handler
+
+FUNCTION(DMA1_Channel_1_5_Common)
+    // send samples
+    mov r2, 1   // EA
+    ldr r5, LOC({SAMPLES})  // data ptr
+    ldr r6, LOC({NUM_SAMPLES})
+    ldrh r6, [r6]
+    lsl r6, 1 // data count
+    bl usb_send
+    mov rSTATE, STATE_SENDING
+    pop {{r5, r6, pc}}
+  LOC(NUM_SAMPLES):         .word num_samples
+  LOC({SAMPLES}):           .word samples
+ENDFUNC // DMA1_Channel_1_5_Common
+
+
+FUNCTION(usb_ep1_tx_complete)    // dev -> host
+    // In:  r0 = USB_BASE
+    //      r1 = USB_EPnR
+    //      r2 = EA
+    //      r3 = usb_ep_configs[EA]
+    //      r4 = usb_ep_buffers[EA]
+    push {{r1, r2, lr}}
+    // set EP1R to enable reception
+    bic r1, USB_EPR_DTOG_TX // don't toggle DTOG_TX
+    bic r1, USB_EPR_DTOG_RX // don't toggle DTOG_RX
+    eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
+    eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
+    str r1, [r0, USB_EP1R]
+    // reset the state to idle
+    mov rSTATE, STATE_IDLE
+    pop {{r1, r2, pc}}
+ENDFUNC // usb_ep1_tx_complete
+
+
+FUNCTION(usb_ep1_rx_notify)    // host -> dev
+    // In:  r0 = USB_BASE
+    //      r1 = USB_EPnR
+    //      r2 = EA (not used)
+    //      r4 = data len
+    push {{r0-r4, lr}}
+
+    cmp r4, 8
+    blo LOC(DONE)
+    
+    // message          byte0,byte1   byte2,byte3   byte4,byte5   byte6,byte7
+    //                  CMD
+    //
+    // analog sweep     'A'   trig    #samples      trig level    adc spd
+    // digital sweep    'D'   trig    #samples      timer cnt
+    // pwm              'P'   N/A     total         duty
+
+    ldr r3, LOC(RXBUF)
+    ldrb r2, [r3]               // byte0 = CMD
+    ldr r4, LOC({COMMAND})
+    cmp r2, 'A'
+    beq LOC(ANALOG_SWEEP)
+    cmp r2, 'D'
+    beq LOC(DIGITAL_SWEEP)
+    cmp r2, 'P'
+    beq LOC(PWM)
+
+  LOC(DONE):
+    // set EP1R to enable transmission
+    bic r1, USB_EPR_DTOG_TX // don't toggle DTOG_TX
+    bic r1, USB_EPR_DTOG_RX // don't toggle DTOG_RX
+    eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
+    eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
+    str r1, [r0, USB_EP1R]
+
+    pop {{r0-r4, pc}}
+ 
+ LOC(ANALOG_SWEEP):
+    strb r2, [r4]
+    // process byte2,3: num of samples
+    mov r4, MAX_SAMPLES
+    ldrh r2, [r3, 4]
+    cmp r2, r4
+    it hs
+    movhs r2, r4
+    ldr r4, LOC({NUM_SAMPLES})
+    strh r2, [r4]
+    lsr r2, 1       // because of the dual mode we'll acquire sample *pairs*
+    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
+    // process byte4,5: trig level if source=analog
+    ldrh r2, [r3, 8]
+    bic r2, 0xf000
+    ldr r4, LOC({TRIG_LEVEL})
+    strh r2, [r4]
+    // process byte6: bit0,1: adc prescaler
+    ldrb r2, [r3, 12]
+    and r2, 0x03
+    bl adc_configure
+    // start_sweep: continue sampling w/o dma
+    mov r2, heval(ADC_CR2_CONT + ADC_CR2_ADON)
+    str r2, [rADC, ADC_CR2]
+    // restart DMA
+    mov r2, heval((3 << DMA_CCR_PL_Shift) + (2 << DMA_CCR_MSIZE_Shift) + (2 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
+    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
+    // process byte1: trig type
+    ldrh r2, [r3, 1]    // bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
+    and rSTATE, r2, 0x1f
+    b LOC(DONE)
+
+ LOC(DIGITAL_SWEEP):
+    strb r2, [r4]
+    // process byte2,3: num of samples
+    mov r4, MAX_SAMPLES
+    ldrh r2, [r3, 4]
+    cmp r2, r4
+    it hs
+    movhs r2, r4
+    ldr r4, LOC({NUM_SAMPLES})
+    strh r2, [r4]
+    str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
+    // setup TIM1
+    ldr r4, LOC({TIM1_BASE})
+    mov r2, 0
+    str r2, [r4, TIM_CR1]   // disable the timer
+    str r2, [r4, TIM_CNT]   // reset to zero
+    str r2, [r4, TIM_PSC]   // prescaler=0 (16 bit divisor value will be more than enough)
+    // process byte4,5: timer counter
+    ldrh r2, [r3, 8]
+    str r2, [r4, TIM_ARR]
+    // restart DMA
+    mov r2, heval((3 << DMA_CCR_PL_Shift) + (1 << DMA_CCR_MSIZE_Shift) + (1 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
+    str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+    // enable DMA
+    mov r2, TIM_DIER_UDE
+    str r2, [r4, TIM_DIER]
+    // process byte1: trig type
+    ldrh r2, [r3, 1]    // bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
+    and rSTATE, r2, 0x1f
+    b LOC(DONE)
+
+  LOC(PWM):
+    // process byte2,3: pwm total time
+    ldr r4, LOC({TIM2_BASE})
+    ldrh r2, [r3, 4]
+    str r2, [r4, TIM_ARR]
+    // process byte4,5: pwm duty time
+    ldrh r2, [r3, 8]
+    str r2, [r4, TIM_CCR1]
+    b LOC(DONE)
+
+  LOC(RXBUF):               .word USB_EP1_RX_BUF
+  LOC(TRIG_LEVEL):          .word trig_level
+  LOC(COMMAND):             .word command
+  LOC(NUM_SAMPLES):         .word num_samples
+  LOC({TIM1_BASE}):         .word TIM1_BASE
+  LOC({TIM2_BASE}):         .word TIM2_BASE
+ENDFUNC // usb_ep1_rx_notify
+
+
+// --------------------------------------------------------------------------
+    .section .rodata
+
+// --------------------------------------------------------------------------
+    .section .data
+
+command     .byte 0
+    .align 4
+trig_level  .hword 0
+num_samples .hword 0
+    .align 4
+samples     .skip MAX_SAMPLES * 2
+
+
+// --------------------------------------------------------------------------
+    .section .bss
+
+// --------------------------------------------------------------------------
+    .section .periph
+
+// vim: set ts=4 sw=4 et:

@@ -1,0 +1,372 @@
+include(stm32f10x.m4)
+include(st7789.m4)
+
+/* Wiring:
+    SS, CLK, MOSI at SPI2
+    CR is SPI2/MISO
+    RST is on Reset */
+
+
+// --------------------------------------------------------------------------
+    .section .text
+    .align(4)
+
+FUNCTION(st7789_setup)
+    push {{r0, r1, lr}}
+
+    // enable GPIOB on APB2
+    ldr r0, LOC({RCC_BASE})
+    ldr r1, [r0, RCC_APB2ENR]
+    orr r1, RCC_APB2ENR_IOPBEN
+    str r1, [r0, RCC_APB2ENR]
+
+    // configure GPIOB12,13,15 as push-pull alternate output 50MHz
+    // configure GPIOB14 as push-pull output 50MHz
+    ldr r0, LOC({GPIOB_BASE})
+    ldr r1, [r0, GPIO_CRH]
+
+    bic r1, heval(MASK(GPIO_CRH_MODE12) | MASK(GPIO_CRH_CNF12))
+    orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE12_Shift)
+    orr r1, heval(GPIO_CNF_ALTERNATE_PP << GPIO_CRH_CNF12_Shift)
+
+    bic r1, heval(MASK(GPIO_CRH_MODE13) | MASK(GPIO_CRH_CNF13))
+    orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE13_Shift)
+    orr r1, heval(GPIO_CNF_ALTERNATE_PP << GPIO_CRH_CNF13_Shift)
+
+    bic r1, heval(MASK(GPIO_CRH_MODE14) | MASK(GPIO_CRH_CNF14))
+    orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE14_Shift)
+    orr r1, heval(GPIO_CNF_OUTPUT_PP << GPIO_CRH_CNF14_Shift)
+
+    bic r1, heval(MASK(GPIO_CRH_MODE15) | MASK(GPIO_CRH_CNF15))
+    orr r1, heval(GPIO_MODE_OUTPUT_50MHz << GPIO_CRH_MODE15_Shift)
+    orr r1, heval(GPIO_CNF_ALTERNATE_PP << GPIO_CRH_CNF15_Shift)
+
+    str r1, [r0, GPIO_CRH]
+
+    // set GPIOB12-15 to 0
+    mov r1, heval(((1 << 12) + (1 << 13) + (1 << 14) + (1 << 15)) << 0x10)
+    str r1, [r0, GPIO_BSRR]
+
+    // enable SPI2 on APB1
+    ldr r0, LOC({RCC_BASE})
+    ldr r1, [r0, RCC_APB1ENR]
+    orr r1, RCC_APB1ENR_SPI2EN
+    str r1, [r0, RCC_APB1ENR]
+
+    // reset SPI2
+    ldr r1, [r0, RCC_APB1RSTR]
+    mov r2, r1
+    orr r2, RCC_APB1RSTR_SPI2RST
+    str r1, [r0, RCC_APB1RSTR]
+    bic r2, RCC_APB1RSTR_SPI2RST
+    str r2, [r0, RCC_APB1RSTR]
+
+    // setup SPI2
+    ldr r0, LOC({SPI2_BASE})
+    // NOTE: SPI clock is set to clk/2 = 36 MHz, the specified maximum for ST7789 is 33.3 MHz.
+    // This seems to work, but if there are troubles, set it back to 18 MHz.
+    mov r1, heval(SPI_CR1_BIDIOE + (0 << SPI_CR1_BR_Shift) + SPI_CR1_MSTR)
+    str r1, [r0, SPI_CR1]
+
+    mov r1, heval(SPI_CR2_SSOE) // + SPI_CR2_TXEIE) // + SPI_CR2_TXDMAEN)
+    str r1, [r0, SPI_CR2]
+
+    // turn SPI on
+    ldr r0, LOC({SPI2_BASE})
+    ldr r1, [r0, SPI_CR1]
+    orr r1, SPI_CR1_SPE
+    str r1, [r0, SPI_CR1]
+
+    pop {{r0, r1, pc}}
+
+  LOC(BB_SPI2_REMAP):       .word BB(AFIO_BASE + AFIO_MAPR, 0)
+  LOC({RCC_BASE}):          .word RCC_BASE
+  LOC({GPIOB_BASE}):        .word GPIOB_BASE
+  LOC({SPI2_BASE}):         .word SPI2_BASE
+ENDFUNC // st7789_setup
+
+
+FUNCTION(SPI1_Handler)
+    push {{r0, r1, lr}}
+    //ldr r0, LOC({SPI1_BASE})
+    pop {{r0, r1, pc}}
+
+  LOC({SPI1_BASE}):         .word SPI1_BASE
+ENDFUNC // SPI1_Handler
+
+
+FUNCTION(st7789_send)
+    // In: r0 = data to send
+    push {{r1, r2, lr}}
+    ldr r1, LOC({SPI2_BASE})
+  LOC(WAIT_TX_EMPTY):
+    ldr r2, [r1, SPI_SR]
+    tst r2, SPI_SR_TXE
+    beq LOC(WAIT_TX_EMPTY)
+
+    str r0, [r1, SPI_DR]
+    pop {{r1, r2, pc}}
+
+  LOC({SPI2_BASE}):         .word SPI2_BASE
+ENDFUNC // st7789_send
+
+
+FUNCTION(st7789_cd)
+    // In: r0 = cd value (0:data, 1:cmd)
+    push {{r1, r2, lr}}
+    ldr r1, LOC({SPI2_BASE})
+  LOC(WAIT_BUSY):
+    ldr r2, [r1, SPI_SR]
+    tst r2, SPI_SR_BSY
+    bne LOC(WAIT_BUSY)
+
+    ldr r1, LOC(BB_SET)
+    mov r2, 1
+    cmp r0, 0
+    ite ne
+    strne r2, [r1]
+    streq r2, [r1, 0x40]
+    pop {{r1, r2, pc}}
+  // bit-band address for setting PB4
+  // (the reset bit is 0x10 bits above, that means +0x40 offset in bb-space)
+  LOC(BB_SET):              .word BB(GPIOB_BASE + GPIO_BSRR, 0x14)
+  LOC({SPI2_BASE}):         .word SPI2_BASE
+ENDFUNC // st7789_cd
+
+
+FUNCTION(st7789_setarea)
+    // In:  r1 = startx
+    //      r2 = starty
+    //      r3 = endx
+    //      r4 = endy
+    push {{r0, lr}}
+
+    ST7789_SEND(ST7789_CMD_CASET)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    add r0, r2, 0x03
+    bl st7789_send
+    mov r0, 0
+    bl st7789_send
+    add r0, r4, 0x03
+    bl st7789_send
+    ST7789_MODE(0)
+
+    ST7789_SEND(ST7789_CMD_RASET)
+    ST7789_MODE(1)
+    mov r0, 0
+    bl st7789_send
+    add r0, r1, 0x02
+    bl st7789_send
+    mov r0, 0
+    bl st7789_send
+    add r0, r3, 0x02
+    bl st7789_send
+    ST7789_MODE(0)
+
+    pop {{r0, pc}}
+ENDFUNC // st7789_setarea
+
+
+FUNCTION(puts)
+    // In:  r1 = x
+    //      r2 = y
+    //      r3 = fg colour
+    //      r4 = bg colour
+    //      r5 = asciiz string
+    push {{r0-r8, lr}}
+
+    push {{r3, r4}}
+    mov r3, 0x7f
+    add r4, r2, 4
+    bl st7789_setarea
+    pop {{r3, r4}}
+
+    ST7789_SEND(ST7789_CMD_RAMWR)
+    ST7789_MODE(1)
+    ldr r7, LOC(CHARSET)
+    mov r6, 0                       // pixel buffer
+    mov r2, 0                       // 0=buffer is empty, other=one pixel is retained
+    b LOC(SEND_CHAR)                // skip the first separator
+
+  LOC(NEXT_CHAR):
+    mov r1, 0                       // blank separator column
+    bl LOC(SEND_COLUMN)
+
+  LOC(SEND_CHAR):
+    ldrb r1, [r5]                   // r0 = next char code
+    cmp r1, 0
+    beq LOC(END_OF_STRING)
+    add r5, 1
+
+    sub r1, 0x20
+    ldrh r1, [r7, r1, LSL 1]        // r0 = char pattern
+    bl LOC(SEND_COLUMN)
+    lsr r1, 5
+    bl LOC(SEND_COLUMN)
+    lsr r1, 5
+    bl LOC(SEND_COLUMN)
+
+    b LOC(NEXT_CHAR)
+
+  LOC(END_OF_STRING):
+    // check if the last pixel is still retained
+    cmp r2, 0
+    beq LOC(DONE)
+
+    // send out that last 1.5 bytes as 2 bytes
+    lsr r0, r6, 4
+    bl st7789_send
+    lsl r0, r6, 4
+    bl st7789_send
+
+  LOC(DONE):
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_NOP)
+    pop {{r0-r8, pc}}
+
+    // Nested function: send out a column, retain the last pixel if it's odd-numbered
+    // in:  r1[4:0] = column pattern
+    //      r6 = 2-pixel buffer, bit15=1 if already contains one
+  LOC(SEND_COLUMN):
+    push {{lr}}
+    mov r8, 0x10                    // mask for pixel to send
+
+  LOC(NEXT_PIXEL):
+    lsl r6, 12
+    tst r1, r8
+    ite eq
+    orreq r6, r4                    // background colour
+    orrne r6, r3                    // foreground colour
+
+    eors r2, 1
+    bne LOC(DONT_SEND_YET)
+
+    lsr r0, r6, 16
+    bl st7789_send
+    lsr r0, r6, 8
+    bl st7789_send
+    mov r0, r6
+    bl st7789_send
+
+  LOC(DONT_SEND_YET):
+    lsrs r8, 1
+    bne LOC(NEXT_PIXEL)
+    pop {{pc}}
+
+  LOC(CHARSET):             .word charset
+ENDFUNC // puts
+// --------------------------------------------------------------------------
+    .section .rodata
+    .align(4)
+
+charset:
+    /* range: 0x20..0x7f
+    3x5 pixels per char -> 15 bits -> 1 hword per char
+    d4..0=left column top to bottom, d9..d5=middle column, d14..d10=right column, d15=0 */
+
+    .hword 0b000000000000000    // 0x20 = Space
+    .hword 0b000001110100000    // 0x21 = !
+    .hword 0b110000000011000    // 0x22 = "
+    .hword 0b010101111101010    // 0x23 = #
+    .hword 0b100101111101001    // 0x24 = $
+    .hword 0b110010010010011    // 0x25 = %
+    .hword 0b010111010101010    // 0x26 = &
+    .hword 0b000001100000000    // 0x27 = '
+    .hword 0b100010111000000    // 0x28 = (
+    .hword 0b011101000100000    // 0x29 = )
+    .hword 0b101010111010101    // 0x2a = *
+    .hword 0b001001111100100    // 0x2b = +
+    .hword 0b000000001100000    // 0x2c = ,
+    .hword 0b001000010000100    // 0x2d = -
+    .hword 0b000000000100000    // 0x2e = .
+    .hword 0b110000010000011    // 0x2f = /
+
+    .hword 0b011101010101110    // 0x30 = 0
+    .hword 0b111111000000000    // 0x31 = 1
+    .hword 0b010011010110011    // 0x32 = 2
+    .hword 0b010101010110001    // 0x33 = 3
+    .hword 0b001001011101100    // 0x34 = 4
+    .hword 0b100101010111101    // 0x35 = 5
+    .hword 0b100101010101110    // 0x36 = 6
+    .hword 0b110001011110000    // 0x37 = 7
+    .hword 0b010101010101010    // 0x38 = 8
+    .hword 0b011101010101001    // 0x39 = 9
+    .hword 0b000000101000000    // 0x3a = :
+    .hword 0b000000101100000    // 0x3b = ;
+    .hword 0b100010101000100    // 0x3c = <
+    .hword 0b010100101001010    // 0x3d = =
+    .hword 0b001000101010001    // 0x3e = >
+    .hword 0b010001010110000    // 0x3f = ?
+
+    .hword 0b111011010111110    // 0x40 = @
+    .hword 0b011111010001111    // 0x41 = A
+    .hword 0b010101010111111    // 0x42 = B
+    .hword 0b100011000101110    // 0x43 = C
+    .hword 0b011101000111111    // 0x44 = D
+    .hword 0b100011010111111    // 0x45 = E
+    .hword 0b100001010011111    // 0x46 = F
+    .hword 0b101111000101110    // 0x47 = G
+    .hword 0b111110010011111    // 0x48 = H
+    .hword 0b000001111100000    // 0x49 = I
+    .hword 0b111100000100010    // 0x4a = J
+    .hword 0b110110010011111    // 0x4b = K
+    .hword 0b000010000111111    // 0x4c = L
+    .hword 0b111110100011111    // 0x4d = M
+    .hword 0b111110111011111    // 0x4e = N
+    .hword 0b011101000101110    // 0x4f = O
+
+    .hword 0b010001010011111    // 0x50 = P
+    .hword 0b011111001101110    // 0x51 = Q
+    .hword 0b010111010011111    // 0x52 = R
+    .hword 0b100101010101001    // 0x53 = S
+    .hword 0b100001111110000    // 0x54 = T
+    .hword 0b111110000111111    // 0x55 = U
+    .hword 0b111100000111110    // 0x56 = V
+    .hword 0b111110001011111    // 0x57 = W
+    .hword 0b110110010011011    // 0x58 = X
+    .hword 0b110000011111000    // 0x59 = Y
+    .hword 0b110011010110011    // 0x5a = Z
+    .hword 0b100011111100000    // 0x5b = [
+    .hword 0b000110010011000    // 0x5c = \
+    .hword 0b111111000100000    // 0x5d = ]
+    .hword 0b010001000001000    // 0x5e = ^
+    .hword 0b000010000100001    // 0x5f = _
+
+    .hword 0b110001000000000    // 0x60 = `
+    .hword 0b011111010001111    // 0x61 = a
+    .hword 0b010101010111111    // 0x62 = b
+    .hword 0b100011000101110    // 0x63 = c
+    .hword 0b011101000111111    // 0x64 = d
+    .hword 0b100011010111111    // 0x65 = e
+    .hword 0b100001010011111    // 0x66 = f
+    .hword 0b101111000101110    // 0x67 = g
+    .hword 0b111110010011111    // 0x68 = h
+    .hword 0b000001111100000    // 0x69 = i
+    .hword 0b111100000100010    // 0x6a = j
+    .hword 0b110110010011111    // 0x6b = k
+    .hword 0b000010000111111    // 0x6c = l
+    .hword 0b111110100011111    // 0x6d = m
+    .hword 0b111110111011111    // 0x6e = n
+    .hword 0b011101000101110    // 0x6f = o
+
+    .hword 0b010001010011111    // 0x70 = p
+    .hword 0b011111001101110    // 0x71 = q
+    .hword 0b010111010011111    // 0x72 = r
+    .hword 0b100101010101001    // 0x73 = s
+    .hword 0b100001111110000    // 0x74 = t
+    .hword 0b111110000111111    // 0x75 = u
+    .hword 0b111100000111110    // 0x76 = v
+    .hword 0b111110001011111    // 0x77 = w
+    .hword 0b110110010011011    // 0x78 = x
+    .hword 0b110000011111000    // 0x79 = y
+    .hword 0b110011010110011    // 0x7a = z
+    .hword 0b100011101100100    // 0x7b = {
+    .hword 0b000001111100000    // 0x7c = |
+    .hword 0b001001101110001    // 0x7d = }
+    .hword 0b100000100011000    // 0x7e = ~
+    .hword 0b111110101000100    // 0x7f = Del
+
+// vim: set ts=4 sw=4 et:
+

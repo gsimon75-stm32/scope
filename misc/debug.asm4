@@ -1,0 +1,56 @@
+include(boilerplate.m4)
+
+// debug counters and their watchers
+define({debug_counter_def}, {_COUNTER_{}$1  .word 0
+_WATCH_{}$1   .word 0})
+
+define({debug_counter_step}, {
+    push {{ r10, r11, r12 }}
+    ldr r12, DBG_STEP_{}$1
+    ldr r11, [r12]
+    add r11, 1
+    str r11, [r12]
+    ldr r10, [r12, 4]
+    cmp r10, r11
+    pop {{ r10, r11, r12 }}
+    bne DBG_NOT_YET_{}$1
+ DBG_HIT_{}$1:
+    b DBG_NOT_YET_{}$1
+ DBG_STEP_{}$1: .word _COUNTER_{}$1
+ DBG_NOT_YET_{}$1:
+})
+
+define({debug_counter_init}, {
+    ldr r12, DBG_INIT_{}$1
+    mov r11, 0
+    str r11, [r12]
+    b DBG_INITED_{}$1
+ DBG_INIT_{}$1: .word _COUNTER_{}$1
+ DBG_INITED_{}$1:
+})
+
+   
+// ...
+    debug_counter_init(irq)
+    debug_counter_init(ctr)
+    debug_counter_init(ctr_in)
+    debug_counter_init(ctr_out)
+    debug_counter_init(setup)
+// ...
+    debug_counter_step(irq)
+    debug_counter_step(ctr)
+    debug_counter_step(ctr_out)
+    debug_counter_step(ctr_in)
+    debug_counter_step(setup)
+
+
+
+// --------------------------------------------------------------------------
+    .section .bss
+
+debug_counter_def(irq)
+debug_counter_def(ctr)
+debug_counter_def(ctr_in)
+debug_counter_def(ctr_out)
+debug_counter_def(setup)
+

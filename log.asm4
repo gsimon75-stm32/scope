@@ -1,0 +1,362 @@
+include(stm32f10x.m4)
+
+define({LOG_SIZE},  16384)
+
+// --------------------------------------------------------------------------
+    .section .text
+    .align(4)
+
+FUNCTION(_log_init)
+    ldr r0, LOC(LOG_START)
+    ldr r1, LOC(LOG_PTR)
+    str r0, [r1]
+    mov r1, 0
+    str r1, [r0]
+    bx lr
+  LOC(LOG_START):       .word _LOG
+  LOC(LOG_PTR):         .word _LOG_PTR
+ENDFUNC // _log_init
+
+
+FUNCTION(_log_char)
+    // In: r12 = char
+
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+    cmp r2, r0
+    bhs LOC(DONE)
+
+    uxtb r12, r12
+    strh r12, [r2]
+    add r2, 1
+    str r2, [r1]
+
+  LOC(DONE):
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 1
+ENDFUNC // _log_char
+
+
+FUNCTION(_log_str)
+    // In: r12 = ptr to asciiz
+
+    push {{r0, r1, r2, lr}}
+
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+
+    b LOC(CHECK_CHAR)
+
+  LOC(COPY_CHAR):
+    strh r1, [r2]
+    add r2, 1
+  LOC(CHECK_CHAR):
+    ldrb r1, [r12]
+    add r12, 1
+    cmp r1, 0
+    beq LOC(DONE)
+    cmp r2, r0
+    blo LOC(COPY_CHAR)
+
+  LOC(DONE):
+    ldr r1, LOC(LOG_PTR)
+    str r2, [r1]
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 1
+ENDFUNC // _log_str
+
+
+FUNCTION(_log_nibble)
+    lsr r1, r12, 28
+    lsl r12, 4
+    cmp r1, 0x0a
+    ite lo
+    addlo r1, 0x30
+    addhs r1, 0x41 - 0x0a
+    strh r1, [r2]
+    add r2, 1
+    bx lr
+ENDFUNC // _log_nibble
+
+
+FUNCTION(_log_hex1)
+    // In: r12 = value
+
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+    cmp r2, r0
+    bhs LOC(DONE)
+
+    lsl r12, 28
+
+    bl _log_nibble
+
+    ldr r1, LOC(LOG_PTR)
+    str r2, [r1]
+
+  LOC(DONE):
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 3
+ENDFUNC // _log_hex1
+
+
+FUNCTION(_log_hex2)
+    // In: r12 = value
+
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+    cmp r2, r0
+    bhs LOC(DONE)
+
+    lsl r12, 24
+
+    bl _log_nibble
+    bl _log_nibble
+
+    ldr r1, LOC(LOG_PTR)
+    str r2, [r1]
+
+  LOC(DONE):
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 3
+ENDFUNC // _log_hex2
+
+
+FUNCTION(_log_hex4)
+    // In: r12 = value
+
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+    cmp r2, r0
+    bhs LOC(DONE)
+
+    lsl r12, 16
+
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+
+    ldr r1, LOC(LOG_PTR)
+    str r2, [r1]
+
+  LOC(DONE):
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 5
+ENDFUNC // _log_hex4
+
+
+FUNCTION(_log_hex8)
+    // In: r12 = value
+
+    push {{r0, r1, r2, lr}}
+    ldr r0, LOC(LOG_END)
+    ldr r1, LOC(LOG_PTR)
+    ldr r2, [r1]
+    cmp r2, r0
+    bhs LOC(DONE)
+
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+    bl _log_nibble
+
+    ldr r1, LOC(LOG_PTR)
+    str r2, [r1]
+
+  LOC(DONE):
+    pop {{r0, r1, r2, pc}}
+
+  LOC(LOG_PTR):         .word _LOG_PTR
+  LOC(LOG_END):         .word _LOG_END - 9
+ENDFUNC // _log_hex8
+
+
+FUNCTION(_log_usb_data)
+    // In:  r0  = data buffer
+    //      r12 = index
+
+    push {{lr}}
+    ldrh r1, [r0, r12]
+
+    mov r12, ' '
+    bl _log_char
+    lsr r12, r1, 8
+    bl _log_hex2
+    
+    mov r12, ' '
+    bl _log_char
+    mov r12, r1
+    bl _log_hex2
+
+    pop {{pc}}
+ENDFUNC // _log_usb_data
+
+
+FUNCTION(_log_usb)
+    push {{ r0, r1, lr }}
+    
+    // registers as numeric value
+    ldr r0, LOC({USB_BASE})
+
+    adr r12, LOC(ISTR)
+    bl _log_str
+    ldrh r12, [r0, USB_ISTR]
+    bl _log_hex4
+
+    adr r12, LOC(DADDR)
+    bl _log_str
+    ldrh r12, [r0, USB_DADDR]
+    bl _log_hex2
+
+    adr r12, LOC(EP0R)
+    bl _log_str
+    ldrh r12, [r0, USB_EP0R]
+    bl _log_hex4
+
+    ldr r0, LOC({USB_PMA_BASE})
+    
+    adr r12, LOC(RXCOUNT)
+    bl _log_str
+    ldrh r12, [r0, USB_COUNT_RX]
+    bl _log_hex2
+
+    adr r12, LOC(TXCOUNT)
+    bl _log_str
+    ldrh r12, [r0, USB_COUNT_TX]
+    bl _log_hex2
+    mov r12, 0x0a
+    bl _log_char
+
+    // interesting flags
+    // registers as numeric value
+    ldr r0, LOC({USB_BASE})
+    ldrh r1, [r0, USB_ISTR]
+
+    tst r1, USB_ISTR_CTR
+    itt ne
+    adrne r12, LOC(CTR)
+    blne _log_str
+
+    tst r1, USB_ISTR_RESET
+    itt ne
+    adrne r12, LOC(RESET)
+    blne _log_str
+
+    adr r12, LOC(DIR)
+    bl _log_str
+    lsr r12, r1, 4
+    and r12, 1
+    bl _log_hex1
+
+    ldrh r1, [r0, USB_EP0R]
+
+    tst r1, USB_EPR_CTR_RX
+    itt ne
+    adrne r12, LOC(CTR_RX)
+    blne _log_str
+
+    tst r1, USB_EPR_DTOG_RX
+    itt ne
+    adrne r12, LOC(DTOG_RX)
+    blne _log_str
+
+    adr r12, LOC(STAT_RX)
+    bl _log_str
+    lsr r12, r1, 12
+    and r12, 3
+    bl _log_hex1
+
+    tst r1, USB_EPR_SETUP
+    itt ne
+    adrne r12, LOC(SETUP)
+    blne _log_str
+
+    tst r1, USB_EPR_CTR_TX
+    itt ne
+    adrne r12, LOC(CTR_TX)
+    blne _log_str
+
+    tst r1, USB_EPR_DTOG_TX
+    itt ne
+    adrne r12, LOC(DTOG_TX)
+    blne _log_str
+
+    adr r12, LOC(STAT_TX)
+    bl _log_str
+    lsr r12, r1, 4
+    and r12, 3
+    bl _log_hex1
+
+    // data
+    ldr r0, LOC(EP0_BUF)
+
+    adr r12, LOC(DATA)
+    bl _log_str
+
+    mov r12, 0
+    bl _log_usb_data
+    mov r12, 4
+    bl _log_usb_data
+    mov r12, 8
+    bl _log_usb_data
+    mov r12, 12
+    bl _log_usb_data
+
+    mov r12, 0x0a
+    bl _log_char
+
+    pop {{ r0, r1, pc }}
+
+  LOC({USB_BASE}):      .word USB_BASE
+  LOC({USB_PMA_BASE}):  .word USB_PMA_BASE
+  LOC(EP0_BUF):         .word USB_EP0_BUF
+  LOC(ISTR):            .string "ISTR="
+  LOC(DADDR):           .string " DADDR="
+  LOC(EP0R):            .string " EP0R="
+  LOC(RXCOUNT):         .string " #RX="
+  LOC(TXCOUNT):         .string " #TX="
+  LOC(DATA):            .string "\nDATA"
+  LOC(CTR):             .string " CTR"
+  LOC(RESET):           .string " RST"
+  LOC(DIR):             .string " D="
+  LOC(CTR_RX):          .string " RX"
+  LOC(DTOG_RX):         .string " TOGRX"
+  LOC(STAT_RX):         .string " STRX="
+  LOC(SETUP):           .string " SUP"
+  LOC(CTR_TX):          .string " TX"
+  LOC(DTOG_TX):         .string " TOGTX"
+  LOC(STAT_TX):         .string " STTX="
+ENDFUNC // _log_usb
+
+// --------------------------------------------------------------------------
+    .section .bss
+
+_LOG_PTR    .word 0
+_LOG        .skip LOG_SIZE
+_LOG_END:
+
+// vim: set ts=4 sw=4 et:

@@ -1,0 +1,217 @@
+include(stm32f10x.m4)
+
+// --------------------------------------------------------------------------
+    .section .isr_vectors
+
+    .global isr_vector_table
+isr_vector_table:
+    .word Initial_SP
+    .word Reset_Handler
+    .word NonMaskableInt_Handler
+    .word HardFault_Handler
+    .word MemoryManagement_Handler
+    .word BusFault_Handler
+    .word UsageFault_Handler
+    .word 0
+    .word 0
+    .word 0
+    .word 0
+    .word SVCall_Handler
+    .word DebugMonitor_Handler
+    .word 0
+    .word PendSV_Handler
+    .word SysTick_Handler
+    .word WWDG_Handler
+    .word PVD_Handler
+    .word TAMPER_Handler
+    .word RTC_Handler
+    .word FLASH_Handler
+    .word RCC_Handler
+    .word EXTI0_Handler
+    .word EXTI1_Handler
+    .word EXTI2_Handler
+    .word EXTI3_Handler
+    .word EXTI4_Handler
+    .word DMA1_Channel1_Handler
+    .word DMA1_Channel2_Handler
+    .word DMA1_Channel3_Handler
+    .word DMA1_Channel4_Handler
+    .word DMA1_Channel5_Handler
+    .word DMA1_Channel6_Handler
+    .word DMA1_Channel7_Handler
+    .word ADC1_2_Handler
+    .word USB_HP_CAN1_TX_Handler
+    .word USB_LP_CAN1_RX0_Handler
+    .word CAN1_RX1_Handler
+    .word CAN1_SCE_Handler
+    .word EXTI9_5_Handler
+    .word TIM1_BRK_Handler
+    .word TIM1_UP_Handler
+    .word TIM1_TRG_COM_Handler
+    .word TIM1_CC_Handler
+    .word TIM2_Handler
+    .word TIM3_Handler
+    .word TIM4_Handler
+    .word I2C1_EV_Handler
+    .word I2C1_ER_Handler
+    .word I2C2_EV_Handler
+    .word I2C2_ER_Handler
+    .word SPI1_Handler
+    .word SPI2_Handler
+    .word USART1_Handler
+    .word USART2_Handler
+    .word USART3_Handler
+    .word EXTI15_10_Handler
+    .word RTCAlarm_Handler
+    .word USBWakeUp_Handler
+    .word 0 // TIM8_BRK_Handler
+    .word 0 // TIM8_UP_Handler
+    .word 0 // TIM8_TRG_COM_Handler
+    .word 0 // TIM8_CC_Handler
+    .word 0 // ADC3_Handler
+    .word 0 // FSMC_Handler
+    .word 0 // SDIO_Handler
+
+    // 0x108: .word 0xf108f85f
+    ldr pc, [pc, -264]      // code for boot from SRAM
+
+// --------------------------------------------------------------------------
+	.section .text
+    .align(4)
+
+FUNCTION(Dummy_Handler)
+    bx lr
+ENDFUNC
+
+FUNCTION(Trap_Handler)
+  LOC(FOREVER):
+    b LOC(FOREVER)
+ENDFUNC
+
+FUNCTION(HardFault_Handler)
+    mov r0, sp
+    ldr r1, Initial_SP_VALUE
+    mov sp, r1
+    /* bl My_HardFault_Handler */
+    b Reset_Handler
+ENDFUNC
+
+    .align 4
+Initial_SP_VALUE:    .word Initial_SP
+
+FUNCTION(Reset_Handler)
+    // ONLY if booting from SRAM
+    ldr r0, Initial_SP_VALUE
+    mov sp, r0
+
+    // enable flash prefetch and set latency = 2
+    ldr r0, LOC({FLASH_REG_BASE})
+    ldr r1, LOC(FLASH_ACR_VALUE)
+    str r1, [r0, FLASH_ACR]
+    // set vector table to sram
+    ldr r0, LOC({SCB_BASE})
+    ldr r1, LOC(ISR_VTOR)
+    str r1, [r0, SCB_VTOR]
+
+    // Reset the RCC clock configuration to the default reset state
+    ldr r0, LOC({RCC_BASE})
+
+    // Enable HSE
+    ldr r1, [r0, RCC_CR]
+    orr r1, RCC_CR_HSEON
+    str r1, [r0, RCC_CR]
+
+  LOC(WAIT_HSE_READY):
+    ldr r1, [r0, RCC_CR]
+    ands r1, RCC_CR_HSERDY
+    beq LOC(WAIT_HSE_READY)
+
+    ldr r1, LOC(RCC_CFGR_VALUE)
+    str r1, [r0, RCC_CFGR]
+
+    // Enable PLL
+    ldr r1, [r0, RCC_CR]
+    orr r1, RCC_CR_PLLON
+    str r1, [r0, RCC_CR]
+
+  LOC(WAIT_PLL_READY):
+    ldr r1, [r0, RCC_CR]
+    ands r1, RCC_CR_PLLRDY
+    beq LOC(WAIT_PLL_READY)
+
+    // Select PLL as system clock source
+    ldr r1, [r0, RCC_CFGR]
+    mov r2, MASK(RCC_CFGR_SW)
+    bic r1, r2
+    orr r1, RCC_CFGR_SW_PLL
+    str r1, [r0, RCC_CFGR]
+
+    mov r2, MASK(RCC_CFGR_SWS)
+  LOC(WAIT_SWITCH_TO_PLL):
+    ldr r1, [r0, RCC_CFGR]
+    and r1, r2
+    cmp r1, RCC_CFGR_SWS_PLL
+    bne LOC(WAIT_SWITCH_TO_PLL)
+
+    // enable AFIO
+    ldr r1, [r0, RCC_APB2ENR]
+    orr r1, RCC_APB2ENR_AFIOEN
+    str r1, [r0, RCC_APB2ENR]
+
+    // disable JTAG, leave SWD enabled
+    ldr r0, LOC({AFIO_BASE})
+    ldr r1, [r0, AFIO_MAPR]
+    bic r1, MASK(AFIO_MAPR_SWJ_CFG)
+    orr r1, AFIO_MAPR_SWJ_CFG_JTAGDISABLE
+    str r1, [r0, AFIO_MAPR]
+
+    ifelse(BUILD,{flash},{
+    // copy .data to sram
+    ldr r1, LOC(SRC_DATA)
+    ldr r2, LOC(DST_DATA)
+    ldr r3, LOC(END_DATA)
+    b LOC(COPY_DATA_CHECK)
+  LOC(COPY_DATA):
+    ldmia r1!, {{ r0 }}
+    stmia r2!, {{ r0 }}
+  LOC(COPY_DATA_CHECK):
+    cmp r2, r3
+    blo LOC(COPY_DATA)
+    })
+
+    // zero-fill .bss
+    mov r0, 0
+    ldr r2, LOC(DST_BSS)
+    ldr r3, LOC(END_BSS)
+    b LOC(FILL_BSS_CHECK)
+  LOC(FILL_BSS):
+    stmia r2!, {{ r0 }}
+  LOC(FILL_BSS_CHECK):
+    cmp r2, r3
+    blo LOC(FILL_BSS)
+
+    b main
+
+  LOC({SCB_BASE}):      .word SCB_BASE
+  LOC({ISR_VTOR}):      .word ifelse(BUILD,{sram},SRAM_BASE,BUILD,{flash},FLASH_BASE)
+  LOC({RCC_BASE}):      .word RCC_BASE
+  LOC({GPIOC_BASE}):    .word GPIOC_BASE
+
+  LOC(RCC_CFGR_VALUE):  .word heval(RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_PPRE1_DIV2 | RCC_CFGR_PLLSRC_HSE | RCC_CFGR_PLLMULL9)
+  LOC(RCC_CR_VALUE):    .word heval(RCC_CR_HSION | RCC_CR_HSEON | RCC_CR_PLLON)
+
+  LOC({FLASH_REG_BASE}):.word FLASH_REG_BASE
+  LOC(FLASH_ACR_VALUE): .word heval(FLASH_ACR_PRFTBE | 0x02)
+  LOC({AFIO_BASE}):     .word AFIO_BASE
+
+  ifelse(BUILD,{flash},{
+  LOC(DST_DATA):        .word _begin_data
+  LOC(END_DATA):        .word _end_data
+  LOC(SRC_DATA):        .word _end_text
+  })
+  LOC(DST_BSS):         .word _begin_bss
+  LOC(END_BSS):         .word _end_bss
+ENDFUNC
+
+
+// vim: set ts=4 sw=4 et:
