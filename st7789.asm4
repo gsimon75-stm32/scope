@@ -210,7 +210,7 @@ FUNCTION(st7789_initialise)
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLAR)
     ST7789_MODE(1)
-    ST7789_SEND(0, 0, 0, heval(ST7789_MAXY - 1))  // visible panel area
+    ST7789_SEND(0, 0, 0, 0x80)  // visible panel area
     ST7789_MODE(0)
     ST7789_SEND(ST7789_CMD_PTLON)
     ST7789_SEND(ST7789_CMD_CASET)
@@ -220,6 +220,10 @@ FUNCTION(st7789_initialise)
     ST7789_SEND(ST7789_CMD_RASET)
     ST7789_MODE(1)
     ST7789_SEND(0, heval(ST7789_RASET_BASE + 0), 0, heval(ST7789_RASET_BASE + ST7789_MAXX - 1))
+    ST7789_MODE(0)
+    ST7789_SEND(ST7789_CMD_VSCRSADD)
+    ST7789_MODE(1)
+    ST7789_SEND(0, 128)
     ST7789_MODE(0)
 
     ST7789_SEND(ST7789_CMD_RAMWR)
@@ -446,6 +450,9 @@ FUNCTION(puts)
     lsl r8, 1
     lsl r0, r8, 1
     add r0, r8
+    subs r0, 4
+    it lo
+    addlo r0, 132
     bl st7789_send
 
     // clear the new line
