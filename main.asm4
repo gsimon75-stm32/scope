@@ -367,7 +367,7 @@ FUNCTION(main)
 
     // trig condition met, start sampling
     mov rSTATE, STATE_SAMPLING
-    // analog: continue sampling w/ dma
+    // analog: continue sampling, now with dma enabled
     mov r1, heval(ADC_CR2_CONT + ADC_CR2_ADON + ADC_CR2_DMA)
     str r1, [rADC, ADC_CR2]
     // digital: enable timer
@@ -473,7 +473,7 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     //      r1 = USB_EPnR
     //      r2 = EA (not used)
     //      r4 = data len
-    push {{r0-r4, lr}}
+    push {{r0-r5, lr}}
 
     cmp r4, 8
     blo LOC(DONE)
@@ -481,7 +481,7 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     // message          byte0,byte1     byte2,byte3   byte4,byte5   byte6,byte7
     //                  CMD
     //
-    // sweep            'S',trig+adcpsc #samples      trig level    timer cnt
+    // sweep            'S',trig+adcpsc #samples      trig level
     // pwm              'P'   N/A       total         duty
     // event            'E'   n
 
@@ -501,11 +501,12 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
     eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
     str r1, [r0, USB_EP1R]
-    pop {{r0-r4, pc}}
+    pop {{r0-r5, pc}}
  
  LOC(PREPARE_SWEEP):
     // process byte2,3: num of samples
     ldrh r2, [r3, 4]
+    // clamp down to MAX_SAMPLES
     mov r4, MAX_SAMPLES
     cmp r2, r4
     it hs
@@ -513,17 +514,18 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     ldr r4, LOC({NUM_SAMPLES})
     strh r2, [r4]
     str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
+    lsr r5, r2, 1       // n = num_samples / 2, because of the dual adc mode we'll acquire *pairs* of hwords -> words 
+    str r5, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
 
     // digital dest area = analog dest area + num_samples (hwords)
-    lsl r2, 1       // n = num_samples * 2
     ldr r4, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
-    add r4, r2
+    lsl r5, r2, 1       // n = num_samples * 2
+    add r4, r5
     str r4, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
-    lsr r2, 2       // n = num_samples / 2, because of the dual adc mode we'll acquire *pairs* of hwords -> words 
-    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
     
     // process byte4,5: trig level
     ldrh r2, [r3, 8]
+    // clamp down to 0x0fff
     bic r2, 0xf000
     ldr r4, LOC({TRIG_LEVEL})
     strh r2, [r4]
@@ -533,20 +535,22 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     and rSTATE, r2, 0x1f
     lsr r2, 6
     bl adc_configure
+    // timer counter = 14 * (prescaler + 1) - 1 = 14 * prescaler + 13
+    mov r5, 14
+    mul r5, r2
+    add r5, 13
     
     // start digital sweep: setup timer but don't enable it yet
     ldr r4, LOC({TIM1_BASE})
     mov r2, 0
     str r2, [r4, TIM_CR1]   // disable the timer
     str r2, [r4, TIM_CNT]   // reset to zero
-    // process byte6,7: timer counter
-    ldrh r2, [r3, 12]
-    str r2, [r4, TIM_ARR]
+    str r5, [r4, TIM_ARR]   // set limit
     // enable DMA
     mov r2, heval((3 << DMA_CCR_PL_Shift) + (1 << DMA_CCR_MSIZE_Shift) + (1 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
     str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
     
-    // start analog sweep: continue sampling w/o dma
+    // start analog sweep: continue sampling but without dma
     mov r2, heval(ADC_CR2_CONT + ADC_CR2_ADON)
     str r2, [rADC, ADC_CR2]
     // enable DMA

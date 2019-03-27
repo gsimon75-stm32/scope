@@ -147,9 +147,8 @@ main_loop(void *userdata) {
                 request[3] = ((num_samples >> 8) & 0xff);
                 request[4] = ( (trig_level << 4)        & 0xff);
                 request[5] = (((trig_level << 4)  >> 8) & 0xff);
-                n = 14 * (sample_rate + 1) - 1;
-                request[6] =  n       & 0xff;
-                request[7] = (n >> 8) & 0xff;
+                request[6] = 0;
+                request[7] = 0;
 
                 n = 0;
                 res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
