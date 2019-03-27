@@ -1,7 +1,7 @@
 include(stm32f10x.m4)
 include(st7789.m4)
 
-define({MAX_SAMPLES}, 2048)
+define({MAX_SAMPLES}, 1200)
 
 
 define({rADC}, r11)
@@ -105,7 +105,7 @@ FUNCTION(adc_configure)
     // set ADC prescaler
     ldr r0, LOC({RCC_BASE})
     ldr r1, [r0, RCC_CFGR]
-    mov r3, MASK(RCC_CFGR_ADCPRE)
+    mov r3, MASK(RCC_CFGR_ADCPRE)       // FIXME: simplify
     bic r1, r3
     lsl r3, r2, RCC_CFGR_ADCPRE_Shift
     orr r1, r3
@@ -272,27 +272,18 @@ FUNCTION(main)
     movt r1, 0x4444
     str r1, [r0, GPIO_CRL]
 
-    bl tim2_setup
-
     bl usb_hw_setup
     bl st7789_setup
     bl st7789_initialise
 
-    bl test_screen // doesn't return
-
-    ldr rADC, LOC({ADC1_BASE})
     ldr rDMA, LOC({DMA1_BASE})
 
-    bl adc_setup
-
-    cpsie i   // we may enable IRQs, because the transfer will be done by DMA
-    
     // setup DMA addresses
     mov r0, 0                                       // disable channel1
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
     add r0, rADC, ADC_DR
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CPAR]
-    ldr r0, LOC({SAMPLES})
+    ldr r0, LOC({SAMPLES_ANALOG})
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
     mov r0, MAX_SAMPLES
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
@@ -301,7 +292,7 @@ FUNCTION(main)
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
     ldr r0, LOC(GPIOA_IDR)
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CPAR]
-    ldr r0, LOC({SAMPLES})
+    ldr r0, LOC({SAMPLES_DIGITAL})
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
     mov r0, MAX_SAMPLES
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
@@ -309,6 +300,22 @@ FUNCTION(main)
     mov r0, heval(DMA_IR_GIF1 + DMA_IR_GIF5)
     str r0, [rDMA, DMA_IFCR]
 
+    ldr rADC, LOC({ADC1_BASE})
+    bl adc_setup
+    bl tim2_setup
+    // setup TIM1
+    ldr r0, LOC({TIM1_BASE})
+    mov r1, 0
+    str r1, [r0, TIM_CR1]   // disable the timer
+    str r1, [r0, TIM_CNT]   // reset to zero
+    str r1, [r0, TIM_PSC]   // prescaler=0 (16 bit divisor value will be more than enough)
+    mov r1, TIM_DIER_UDE
+    str r1, [r0, TIM_DIER]
+
+    //bl test_screen // doesn't return
+
+    cpsie i   // we may enable IRQs, because the transfer will be done by DMA
+    
     mov rSTATE, STATE_IDLE
 
   LOC(FOREVER):
@@ -362,15 +369,18 @@ FUNCTION(main)
     beq LOC(WAIT_TRIG_2)
     tst rSTATE, 0x04
     beq LOC(WAIT_TRIG_3)
+
     // trig condition met, start sampling
     mov rSTATE, STATE_SAMPLING
-    ldr r0, LOC(COMMAND)
-    ldrb r0, [r0]
-    cmp r0, 'A'
-    beq LOC(START_SAMPLING_ANALOG)
-    cmp r0, 'D'
-    beq LOC(START_SAMPLING_DIGITAL)
+    // analog: continue sampling w/ dma
+    mov r1, heval(ADC_CR2_CONT + ADC_CR2_ADON + ADC_CR2_DMA)
+    str r1, [rADC, ADC_CR2]
+    // digital: enable timer
+    ldr r1, LOC({TIM1_BASE})
+    mov r0, heval(TIM_CR1_URS + TIM_CR1_CEN)
+    str r0, [r1, TIM_CR1]
     b LOC(FOREVER)
+
   LOC(WAIT_TRIG_1):  // wait for low
     cmp r0, 0
     it eq
@@ -387,18 +397,6 @@ FUNCTION(main)
     orreq rSTATE, 0x04
     b LOC(FOREVER)
 
-  LOC(START_SAMPLING_ANALOG):
-    // continue sampling w/ dma
-    mov r1, heval(ADC_CR2_CONT + ADC_CR2_ADON + ADC_CR2_DMA)
-    str r1, [rADC, ADC_CR2]
-    b LOC(FOREVER)
-  
-  LOC(START_SAMPLING_DIGITAL):
-    mov r0, heval(TIM_CR1_URS + TIM_CR1_CEN)
-    ldr r1, LOC({TIM1_BASE})
-    str r0, [r1, TIM_CR1]   // enable the timer
-    b LOC(FOREVER)
-
   LOC({NVIC_BASE}):         .word NVIC_BASE
   LOC({RCC_BASE}):          .word RCC_BASE
   LOC({GPIOA_BASE}):        .word GPIOA_BASE
@@ -408,8 +406,8 @@ FUNCTION(main)
   LOC({DMA1_BASE}):         .word DMA1_BASE
   
   LOC({TRIG_LEVEL}):        .word trig_level
-  LOC(COMMAND):             .word command
-  LOC({SAMPLES}):           .word samples
+  LOC({SAMPLES_ANALOG}):    .word samples_analog
+  LOC({SAMPLES_DIGITAL}):   .word samples_digital
   LOC(GPIOA_IDR):           .word heval(GPIOA_BASE + GPIO_IDR)
   LOC(USB_EP_BUFFERS):      .word usb_ep_buffers
 
@@ -436,17 +434,24 @@ FUNCTION(DMA1_Channel5_Handler)
 ENDFUNC // DMA1_Channel5_Handler
 
 FUNCTION(DMA1_Channel_1_5_Common)
+    ldr r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
+    tst r0, DMA_CCR_EN
+    bne LOC(NOT_YET)
+    ldr r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+    tst r0, DMA_CCR_EN
+    bne LOC(NOT_YET)
     // send samples
     mov r2, 1   // EA
-    ldr r5, LOC({SAMPLES})  // data ptr
+    ldr r5, LOC({SAMPLES_BOTH})  // data ptr
     ldr r6, LOC({NUM_SAMPLES})
     ldrh r6, [r6]
-    lsl r6, 1 // data count
+    lsl r6, 2 // data count
     bl usb_send
     mov rSTATE, STATE_SENDING
+  LOC(NOT_YET):
     pop {{r5, r6, pc}}
   LOC(NUM_SAMPLES):         .word num_samples
-  LOC({SAMPLES}):           .word samples
+  LOC({SAMPLES_BOTH}):      .word samples_both
 ENDFUNC // DMA1_Channel_1_5_Common
 
 
@@ -479,21 +484,17 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     cmp r4, 8
     blo LOC(DONE)
     
-    // message          byte0,byte1   byte2,byte3   byte4,byte5   byte6,byte7
+    // message          byte0,byte1     byte2,byte3   byte4,byte5   byte6,byte7
     //                  CMD
     //
-    // analog sweep     'A'   trig    #samples      trig level    adc spd
-    // digital sweep    'D'   trig    #samples      timer cnt
-    // pwm              'P'   N/A     total         duty
+    // sweep            'S',trig+adcpsc #samples      trig level    timer cnt
+    // pwm              'P'   N/A       total         duty
     // event            'E'   n
 
     ldr r3, LOC(RXBUF)
     ldrb r2, [r3]               // byte0 = CMD
-    ldr r4, LOC({COMMAND})
-    cmp r2, 'A'
-    beq LOC(ANALOG_SWEEP)
-    cmp r2, 'D'
-    beq LOC(DIGITAL_SWEEP)
+    cmp r2, 'S'
+    beq LOC(PREPARE_SWEEP)
     cmp r2, 'P'
     beq LOC(PWM)
     cmp r2, 'E'
@@ -506,72 +507,54 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
     eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
     str r1, [r0, USB_EP1R]
-
     pop {{r0-r4, pc}}
  
- LOC(ANALOG_SWEEP):
-    strb r2, [r4]
+ LOC(PREPARE_SWEEP):
     // process byte2,3: num of samples
-    mov r4, MAX_SAMPLES
     ldrh r2, [r3, 4]
-    cmp r2, r4
-    it hs
-    movhs r2, r4
-    ldr r4, LOC({NUM_SAMPLES})
-    strh r2, [r4]
-    lsr r2, 1       // because of the dual mode we'll acquire sample *pairs*
-    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
-    // process byte4,5: trig level if source=analog
-    ldrh r2, [r3, 8]
-    bic r2, 0xf000
-    ldr r4, LOC({TRIG_LEVEL})
-    strh r2, [r4]
-    // process byte6: bit0,1: adc prescaler
-    ldrb r2, [r3, 12]
-    and r2, 0x03
-    bl adc_configure
-    // start_sweep: continue sampling w/o dma
-    mov r2, heval(ADC_CR2_CONT + ADC_CR2_ADON)
-    str r2, [rADC, ADC_CR2]
-    // restart DMA
-    mov r2, heval((3 << DMA_CCR_PL_Shift) + (2 << DMA_CCR_MSIZE_Shift) + (2 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
-    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
-    // process byte1: trig type
-    ldrh r2, [r3, 1]    // bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
-    and rSTATE, r2, 0x1f
-    b LOC(DONE)
-
- LOC(DIGITAL_SWEEP):
-    strb r2, [r4]
-    // process byte2,3: num of samples
     mov r4, MAX_SAMPLES
-    ldrh r2, [r3, 4]
     cmp r2, r4
     it hs
     movhs r2, r4
     ldr r4, LOC({NUM_SAMPLES})
     strh r2, [r4]
     str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
-    // setup TIM1
+    lsr r2, 1       // because of the dual adc mode we'll acquire *pairs* of hwords -> words 
+    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
+    
+    // process byte4,5: trig level
+    ldrh r2, [r3, 8]
+    bic r2, 0xf000
+    ldr r4, LOC({TRIG_LEVEL})
+    strh r2, [r4]
+    
+    // process byte1: bit7,6: adc prescaler, bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
+    ldrh r2, [r3, 1]
+    and rSTATE, r2, 0x1f
+    lsr r2, 6
+    bl adc_configure
+    
+    // start digital sweep: setup timer but don't enable it yet
     ldr r4, LOC({TIM1_BASE})
     mov r2, 0
     str r2, [r4, TIM_CR1]   // disable the timer
     str r2, [r4, TIM_CNT]   // reset to zero
-    str r2, [r4, TIM_PSC]   // prescaler=0 (16 bit divisor value will be more than enough)
-    // process byte4,5: timer counter
-    ldrh r2, [r3, 8]
+    // process byte6,7: timer counter
+    ldrh r2, [r3, 12]
     str r2, [r4, TIM_ARR]
-    // restart DMA
+    // enable DMA
     mov r2, heval((3 << DMA_CCR_PL_Shift) + (1 << DMA_CCR_MSIZE_Shift) + (1 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
     str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+    
+    // start analog sweep: continue sampling w/o dma
+    mov r2, heval(ADC_CR2_CONT + ADC_CR2_ADON)
+    str r2, [rADC, ADC_CR2]
     // enable DMA
-    mov r2, TIM_DIER_UDE
-    str r2, [r4, TIM_DIER]
-    // process byte1: trig type
-    ldrh r2, [r3, 1]    // bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
-    and rSTATE, r2, 0x1f
+    mov r2, heval((3 << DMA_CCR_PL_Shift) + (2 << DMA_CCR_MSIZE_Shift) + (2 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
+    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
     b LOC(DONE)
 
+   
   LOC(PWM):
     // process byte2,3: pwm total time
     ldr r4, LOC({TIM2_BASE})
@@ -630,7 +613,6 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
 
   LOC(RXBUF):               .word USB_EP1_RX_BUF
   LOC(TRIG_LEVEL):          .word trig_level
-  LOC(COMMAND):             .word command
   LOC(NUM_SAMPLES):         .word num_samples
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({TIM2_BASE}):         .word TIM2_BASE
@@ -648,12 +630,12 @@ ENDFUNC // usb_ep1_rx_notify
 X           .hword 0
     .align 4
 
-command     .byte 0
-    .align 4
 trig_level  .hword 0
 num_samples .hword 0
     .align 4
-samples     .skip MAX_SAMPLES * 2
+samples_both:
+samples_analog      .skip MAX_SAMPLES * 2
+samples_digital     .skip MAX_SAMPLES * 2
 
 
 // --------------------------------------------------------------------------

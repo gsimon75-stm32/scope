@@ -22,8 +22,8 @@ libusb_context          *ctx;
 libusb_device           **devices;
 libusb_device_handle    *dh;
 
-uint16_t                num_samples = 1028;
-uint16_t                samples[MAX_SAMPLES];
+uint16_t                num_samples = 1200;
+uint16_t                samples[2 * MAX_SAMPLES];
 double                  sampling_interval;
 #ifdef DO_RESAMPLE
 uint16_t                resampled[MAX_SAMPLES];
@@ -141,44 +141,15 @@ main_loop(void *userdata) {
             break;
 
             case scope_command_t::NORMAL: {
-                request[0] = 'A'; // command: analog sweep
-                request[1] = trig_dir + trig_source;
+                request[0] = 'S'; // command: sweep
+                request[1] = ((sample_rate & 3) << 6) + trig_dir + trig_source;
                 request[2] = ( num_samples       & 0xff);
                 request[3] = ((num_samples >> 8) & 0xff);
                 request[4] = ( (trig_level << 4)        & 0xff);
                 request[5] = (((trig_level << 4)  >> 8) & 0xff);
-                request[6] = sample_rate;
-                request[7] = 0;
-
-                n = 0;
-                res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
-                if (res != LIBUSB_SUCCESS) // FIXME: could not send data
-                    continue;
-
-                n = 0;
-                //fprintf(stderr, "receiving analog... ");
-                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
-                //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
-                if (res != LIBUSB_SUCCESS) // FIXME: reception error
-                    continue;
-
-                n /= sizeof(samples[0]);
-#ifdef DO_RESAMPLE
-                n = resample(resampled, n, samples);
-                add_analog_samples(n, &resampled[0]);
-#else // DO_RESAMPLE
-                add_analog_samples(n, &samples[0]);
-#endif // DO_RESAMPLE
-
-                request[0] = 'D'; // command: analog sweep
-                request[1] = trig_dir + trig_source;
-                request[2] =  num_samples       & 0xff;
-                request[3] = (num_samples >> 8) & 0xff;
                 n = 14 * (sample_rate + 1) - 1;
-                request[4] =  n       & 0xff;
-                request[5] = (n >> 8) & 0xff;
-                request[6] = 0;
-                request[7] = 0;
+                request[6] =  n       & 0xff;
+                request[7] = (n >> 8) & 0xff;
 
                 n = 0;
                 res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
@@ -186,19 +157,18 @@ main_loop(void *userdata) {
                     continue;
 
                 n = 0;
-                //fprintf(stderr, "receiving digital... ");
-                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, num_samples * sizeof(samples[0]), &n, 0);
+                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, 2 * num_samples * sizeof(samples[0]), &n, 0);
                 //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
                 if (res != LIBUSB_SUCCESS) // FIXME: reception error
                     continue;
 
-                n /= sizeof(samples[0]);
-#ifdef DO_RESAMPLE
-                n = resample(resampled, n, samples);
+                uint16_t *samples_analog = &(samples[0]);
+                uint16_t *samples_digital = &(samples[num_samples]);
+                n = resample(resampled, num_samples, samples_analog);
+                add_analog_samples(n, &resampled[0]);
+
+                n = resample(resampled, num_samples, samples_digital);
                 add_digital_samples(n, &resampled[0]);
-#else // DO_RESAMPLE
-                add_digital_samples(n, &samples[0]);
-#endif // DO_RESAMPLE
             }
             break;
         }
