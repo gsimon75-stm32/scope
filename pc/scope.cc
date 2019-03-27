@@ -22,8 +22,8 @@ uint8_t trig_dir = trig_direction_t::RISING;
 uint8_t trig_source = trig_source_t::ANALOG;
 uint8_t trig_level = 0x80;
 
-uint16_t pwm_total = 7200; // 10 kHz
-uint16_t pwm_duty = pwm_total / 4;
+uint16_t pwm_total = 576; // 125 kHz
+uint16_t pwm_duty = pwm_total / 2;
 // for adaptive increase/decrease
 int pwm_step = 1;
 int pwm_count = 0;
@@ -47,7 +47,7 @@ commit_pwm(void) {
         pwm_count++;
         if (pwm_count >= 20) {
             pwm_count = 1;
-            pwm_step *= 10;
+            pwm_step *= 5;
         }
     }
 }
