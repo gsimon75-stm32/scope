@@ -22,7 +22,7 @@ libusb_context          *ctx;
 libusb_device           **devices;
 libusb_device_handle    *dh;
 
-uint16_t                num_samples = 1200;
+uint16_t                num_samples = 1028;
 uint16_t                samples[2 * MAX_SAMPLES];
 double                  sampling_interval;
 #ifdef DO_RESAMPLE
