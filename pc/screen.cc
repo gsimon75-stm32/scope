@@ -49,7 +49,9 @@ add_analog_samples(uint16_t num_samples, uint16_t *samples) {
         num_samples = ANALOG_SCREEN_WIDTH;
 
     for (int x = 0; (x < ANALOG_SCREEN_WIDTH) && (x < num_samples); ++x) {
-        uint8_t y = samples[x] >> 4;
+        uint16_t y = (((uint32_t)samples[x]) * 330) >> 12;
+        if (y >= ANALOG_SCREEN_HEIGHT)
+            y = ANALOG_SCREEN_HEIGHT - 1;
         //y = (voltage_factor * y) >> 8;
 
         ++count_density[y];
@@ -61,7 +63,7 @@ add_analog_samples(uint16_t num_samples, uint16_t *samples) {
 
         reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0;
         reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0;
-        lastOfs[x] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(255 - y)) + x];
+        lastOfs[x] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(ANALOG_SCREEN_HEIGHT - 1 - y)) + x];
         reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0xff;
         reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0x7f;
     }
