@@ -160,9 +160,15 @@ redraw_trig_marker(void) {
         cdir = '\\';
         break;
     }
+
+    uint16_t y = ((uint16_t)trig_level * 330) >> 8;
+    if (y < 4)
+        y = 4;
+    if (y > TRIG_MARKER_HEIGHT - 4)
+        y = TRIG_MARKER_HEIGHT - 4;
     
-    putchar(trig_marker, TRIG_MARKER_WIDTH, 0, TRIG_MARKER_HEIGHT - trig_level + 4, csrc, 0xffffff);
-    putchar(trig_marker, TRIG_MARKER_WIDTH, 8, TRIG_MARKER_HEIGHT - trig_level + 4, cdir, 0xffffff);
+    putchar(trig_marker, TRIG_MARKER_WIDTH, 0, TRIG_MARKER_HEIGHT - y + 4, csrc, 0xffffff);
+    putchar(trig_marker, TRIG_MARKER_WIDTH, 8, TRIG_MARKER_HEIGHT - y + 4, cdir, 0xffffff);
     SDL_UpdateTexture(txt_trig_marker, nullptr, &trig_marker, 4*TRIG_MARKER_WIDTH);
     SDL_RenderCopy(renderer, txt_trig_marker, nullptr, &dst_trig_marker);
     SDL_RenderPresent(renderer);

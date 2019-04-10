@@ -11,6 +11,7 @@ void set_trig_dir(uint8_t n);
 void set_trig_source(uint8_t n);
 void set_pwm(uint16_t total, uint16_t duty);
 void send_custom_event(uint8_t n);
+void resume(void);
 void shutdown_device();
 
 #endif // DEVICE_H

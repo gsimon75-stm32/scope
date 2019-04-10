@@ -16,7 +16,7 @@ SDL_Texture *txt_analog_screen;
 SDL_Rect dst_analog_screen { ANALOG_SCREEN_X, ANALOG_SCREEN_Y, ANALOG_SCREEN_WIDTH, ANALOG_SCREEN_HEIGHT };
 uint32_t* lastOfs[ANALOG_SCREEN_WIDTH];
 
-uint32_t density[DENSITY_HEIGHT*DENSITY_WIDTH], count_density[DENSITY_HEIGHT*DENSITY_WIDTH];
+uint32_t density[DENSITY_HEIGHT], count_density[DENSITY_HEIGHT];
 SDL_Texture *txt_density;
 SDL_Rect dst_density { DENSITY_X, DENSITY_Y, DENSITY_WIDTH, DENSITY_HEIGHT };
 
@@ -56,8 +56,8 @@ add_analog_samples(uint16_t num_samples, uint16_t *samples) {
 
         ++count_density[y];
         if (count_density[y] == 0xff) {
-            for (int i = 0; i < 0xff; ++i)
-                density[255 - i] = count_density[i] * 0x010101;
+            for (int i = 0; i < DENSITY_HEIGHT; ++i)
+                density[DENSITY_HEIGHT - i] = count_density[i] * 0x010101;
             memset(count_density, 0, sizeof(count_density));
         }
 

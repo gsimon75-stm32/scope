@@ -67,6 +67,7 @@ struct scope_command_t {
     };
 };
 extern uint8_t cmd;
+extern bool do_pause;
 
 struct trig_direction_t {
     enum {

@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -31,6 +32,7 @@ double                  raw_sampling_interval;
 #endif // DO_RESAMPLE
 
 uint8_t                 cmd = scope_command_t::NORMAL;
+bool                    do_pause = false;
 uint16_t                send_pwm_total, send_pwm_duty;
 uint8_t                 custom_event_idx;
 
@@ -102,7 +104,16 @@ main_loop(void *userdata) {
 
     uint8_t request[8];
     int n;
+    int waitcnt = 0;
     while (cmd != scope_command_t::QUIT) {
+        if (do_pause) {
+            sigset_t sigset_current;
+            pthread_sigmask(0, nullptr, &sigset_current);
+            int res = sigsuspend(&sigset_current);
+            fprintf(stderr, "pause: wait res=0x%08x, counter=%d\n", res, waitcnt++);
+            continue;
+        }
+
         switch (cmd) {
             case scope_command_t::SEND_PWM: {
                 cmd = scope_command_t::NORMAL;
@@ -238,6 +249,11 @@ void send_custom_event(uint8_t n) {
         ;
     custom_event_idx = n;
     cmd = scope_command_t::SEND_CUSTOM_EVENT;
+    pthread_kill(thr_sampling, SIGUSR1);
+}
+
+void
+resume(void) {
     pthread_kill(thr_sampling, SIGUSR1);
 }
 

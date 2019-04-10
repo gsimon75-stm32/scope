@@ -121,6 +121,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_LEFT:
+                do_pause = false;
                 switch (sample_rate) {
                     case 1: set_sample_rate(0); break;
                     case 3: set_sample_rate(1); break;
@@ -129,6 +130,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_RIGHT:
+                do_pause = false;
                 switch (sample_rate) {
                     case 0: set_sample_rate(1); break;
                     case 1: set_sample_rate(3); break;
@@ -137,7 +139,8 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_UP:
-                if (trig_level < 0xff) {
+                do_pause = false;
+                if (trig_level < 0xfe) {
                     ++trig_level;
                     set_trig_level(trig_level);
                     redraw_trig_marker();
@@ -145,7 +148,8 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_DOWN:
-                if (trig_level > 0) {
+                do_pause = false;
+                if (trig_level > 1) {
                     --trig_level;
                     set_trig_level(trig_level);
                     redraw_trig_marker();
@@ -153,6 +157,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_s:
+                do_pause = false;
                 switch (trig_source) {
                     case trig_source_t::ANALOG:  set_trig_source(trig_source_t::DIGITAL); break;
                     case trig_source_t::DIGITAL: set_trig_source(trig_source_t::ANALOG);  break;
@@ -161,6 +166,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_t:
+                do_pause = false;
                 switch (trig_dir) {
                     case trig_direction_t::NONE:    set_trig_dir(trig_direction_t::RISING);  break;
                     case trig_direction_t::RISING:  set_trig_dir(trig_direction_t::FALLING); break;
@@ -170,6 +176,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_PAGEUP:
+                do_pause = false;
                 if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_total < (65535 - pwm_step)) {
                         pwm_total += pwm_step;
@@ -185,6 +192,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_PAGEDOWN:
+                do_pause = false;
                 if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_total > (pwm_duty + pwm_step)) {
                         pwm_total -= pwm_step;
@@ -200,19 +208,30 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_1:
+                do_pause = false;
                 send_custom_event(1);
                 break;
 
                 case SDLK_2:
+                do_pause = false;
                 send_custom_event(2);
                 break;
 
                 case SDLK_3:
+                do_pause = false;
                 send_custom_event(3);
                 break;
 
                 case SDLK_4:
+                do_pause = false;
                 send_custom_event(4);
+                break;
+
+                case SDLK_SPACE:
+                do_pause = !do_pause;
+                if (!do_pause)
+                    resume();
+                fprintf(stderr, "pause=%d\n", do_pause);
                 break;
 
             }
