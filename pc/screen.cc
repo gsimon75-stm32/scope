@@ -78,23 +78,20 @@ add_digital_samples(uint16_t num_samples, uint16_t *samples) {
     for (int x = 0; (x < DIGITAL_SCREEN_WIDTH) && (x < num_samples); ++x) {
         int y = 0;
         for (int mask = 0x80; mask; mask >>= 1) {
-            //digital_screen[DIGITAL_SCREEN_WIDTH*y + x] &= 0xff0000;
             for (int i = 0; i < 5; ++i)
-                digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] &= 0xff0000;
+                digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] &= 0x0000ff;
 
             bool is_high = (samples[x] & mask) != 0;
             bool was_high = (x > 0) ? (samples[x - 1] & mask) != 0 : is_high;
             if (is_high && was_high) {
-                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 0) + x] |= 0xff00;
-                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 4) + x] |= 0x3f00;
+                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 0) + x] |= 0xff0000;
             }
             else if (!is_high && !was_high) {
-                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 0) + x] |= 0x3f00;
-                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 4) + x] |= 0xff00;
+                digital_screen[DIGITAL_SCREEN_WIDTH*(y + 4) + x] |= 0x00ff00;
             }
             else {
                 for (int i = 0; i < 5; ++i)
-                    digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] |= 0xff00;
+                    digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] |= 0xffff00;
             }
             y += 8;
         }
@@ -123,7 +120,7 @@ draw_grid(void) {
                     analog_screen[ANALOG_SCREEN_WIDTH*(ANALOG_SCREEN_HEIGHT-1-y) + i] = 0x7f0000;
             }
         for (int j = 0; j < DIGITAL_SCREEN_HEIGHT; j += 2)
-            digital_screen[DIGITAL_SCREEN_WIDTH*(DIGITAL_SCREEN_HEIGHT-1-j) + i] = 0x7f0000;
+            digital_screen[DIGITAL_SCREEN_WIDTH*(DIGITAL_SCREEN_HEIGHT-1-j) + i] = 0x00007f;
     }
     for (int j = 0; j < ANALOG_SCREEN_HEIGHT; j += 10) {
         int fill = dash_width(j / 10);

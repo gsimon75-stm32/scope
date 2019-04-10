@@ -104,14 +104,11 @@ main_loop(void *userdata) {
 
     uint8_t request[8];
     int n;
-    int waitcnt = 0;
     while (cmd != scope_command_t::QUIT) {
         if (do_pause) {
             sigset_t sigset_current;
             pthread_sigmask(0, nullptr, &sigset_current);
-            int res = sigsuspend(&sigset_current);
-            fprintf(stderr, "pause: wait res=0x%08x, counter=%d\n", res, waitcnt++);
-            continue;
+            sigsuspend(&sigset_current);
         }
 
         switch (cmd) {
