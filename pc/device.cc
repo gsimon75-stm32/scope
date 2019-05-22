@@ -26,10 +26,8 @@ libusb_device_handle    *dh;
 uint16_t                num_samples = 1028;
 uint16_t                samples[2 * MAX_SAMPLES];
 double                  sampling_interval;
-#ifdef DO_RESAMPLE
 uint16_t                resampled[MAX_SAMPLES];
 double                  raw_sampling_interval;
-#endif // DO_RESAMPLE
 
 uint8_t                 cmd = scope_command_t::NORMAL;
 bool                    do_pause = false;
@@ -56,15 +54,18 @@ void sighup_handler(int n) {
     cmd = scope_command_t::QUIT;
 }
 
-#ifdef DO_RESAMPLE
 uint16_t
 resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
+    int trig_delay = (int)(1.5e-6 / raw_sampling_interval); // from trig event to 1st sample: approx 1.5 usec
     uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
-    int sidx = 0, didx = 0;
+    int sidx = 0, didx;
     double t = 0;
 
-    if (new_n > MAX_SAMPLES)
-        new_n = MAX_SAMPLES;
+    if (new_n > (MAX_SAMPLES - trig_delay))
+        new_n = MAX_SAMPLES - trig_delay;
+
+    for (didx = 0; didx < trig_delay; ++didx)
+        dst[didx] = 0;
 
     //fprintf(stderr, "resample from (n=%d, iv=%f) to (n=%d, iv=%f) \n", old_n, raw_sampling_interval * 1e6, new_n, sampling_interval * 1e6);
     while (didx < new_n) {
@@ -81,7 +82,6 @@ resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
 
     return new_n;
 }
-#endif // DO_RESAMPLE
 
 
 void*
@@ -198,7 +198,6 @@ set_sample_rate(uint8_t n) {
     // prescaler values for 0..3 are 2, 4, 6, 8, that is, 2*(n+1)
     sampling_interval = 2 * (sample_rate + 1) * base * 1e-9;
 
-#ifdef DO_RESAMPLE
     raw_sampling_interval = sampling_interval;
     // will be resampled to these rates
     switch (sample_rate) {
@@ -206,7 +205,6 @@ set_sample_rate(uint8_t n) {
         case 1: sampling_interval =  50e-8; break;
         case 3: sampling_interval = 100e-8; break;
     }
-#endif // DO_RESAMPLE
 
     pthread_kill(thr_sampling, SIGUSR1);
 }

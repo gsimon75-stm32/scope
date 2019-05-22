@@ -4,8 +4,6 @@
 #include <stdint.h> 
 #include <SDL.h>
 
-#define DO_RESAMPLE
-
 // sizes of elements:
 #define ANALOG_SCREEN_WIDTH 800
 #define ANALOG_SCREEN_HEIGHT 350

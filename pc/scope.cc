@@ -93,6 +93,7 @@ main(int argc, char **argv) {
     set_trig_dir(trig_direction_t::RISING);
     set_trig_source(trig_source_t::ANALOG);
     set_trig_level(0x80);
+    commit_pwm();
 
     redraw_time_scale();
     //redraw_voltage_scale(voltages[voltage_ref]);
@@ -219,12 +220,16 @@ main(int argc, char **argv) {
 
                 case SDLK_3:
                 do_pause = false;
-                send_custom_event(3);
+                pwm_total = 10000; // 7.2 kHz
+                pwm_duty = pwm_total / 2;
+                commit_pwm();
                 break;
 
                 case SDLK_4:
                 do_pause = false;
-                send_custom_event(4);
+                pwm_total = 576; // 125 kHz
+                pwm_duty = pwm_total / 2;
+                commit_pwm();
                 break;
 
                 case SDLK_SPACE:
