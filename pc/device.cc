@@ -18,6 +18,7 @@
 #include <libusb.h>
 
 #define MAX_SAMPLES     1200
+#define SAMPLING_OVERHEAD_TIME 1.8e-6
 
 libusb_context          *ctx;
 libusb_device           **devices;
@@ -56,7 +57,7 @@ void sighup_handler(int n) {
 
 uint16_t
 resample_mono(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
-    int trig_delay = (int)(1.5e-6 / raw_sampling_interval); // from trig event to 1st sample: approx 1.5 usec
+    int trig_delay = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval); // from trig event to 1st sample
     uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
     int sidx = 0, didx;
     double t = 0;
@@ -85,11 +86,12 @@ resample_mono(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
 
 uint16_t
 resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
+    // dual channel -> 2 uint32_t-s stick together while rescaling
     const uint32_t *src2 = reinterpret_cast<const uint32_t*>(src);
     uint32_t *dst2 = reinterpret_cast<uint32_t*>(dst);
-    //old_n >>= 1;
+    old_n >>= 1;
 
-    int trig_delay = (int)(2.5e-6 / raw_sampling_interval) / 2; // from trig event to 1st sample: approx 1.5 usec
+    int trig_delay = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval) / 2; // from trig event to 1st sample
     uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
     int sidx = 0, didx;
     double t = 0;
@@ -111,7 +113,7 @@ resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
         t -= raw_sampling_interval * skip;
     }
 
-    return new_n;
+    return new_n * 2;
 }
 
 
