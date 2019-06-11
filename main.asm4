@@ -211,6 +211,7 @@ FUNCTION(main)
 
     bl usb_hw_setup
 
+    ldr rADC, LOC({ADC1_BASE})
     ldr rDMA, LOC({DMA1_BASE})
 
     // setup DMA addresses
@@ -230,7 +231,6 @@ FUNCTION(main)
     mov r0, heval(DMA_IR_GIF1 + DMA_IR_GIF5)
     str r0, [rDMA, DMA_IFCR]
 
-    ldr rADC, LOC({ADC1_BASE})
     bl adc_setup
     bl tim2_setup
     // setup TIM1

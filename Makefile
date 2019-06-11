@@ -1,6 +1,6 @@
 TARGETS         = test.elf
-#BUILD           ?= flash
-BUILD           ?= sram
+BUILD           ?= flash
+#BUILD           ?= sram
 
 AS              = arm-none-eabi-as
 AR              = arm-none-eabi-ar
