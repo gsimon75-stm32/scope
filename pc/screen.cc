@@ -64,8 +64,15 @@ add_analog_samples(uint16_t num_samples, uint16_t *samples) {
         reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0;
         reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0;
         lastOfs[x] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(ANALOG_SCREEN_HEIGHT - 1 - y)) + x];
-        reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0xff;
-        reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0x7f;
+
+        if (x & 1) {
+            reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0xff;
+            reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0x7f;
+        }
+        else {
+            reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0x7f;
+            reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0xff;
+        }
     }
     request_redraw();
 }

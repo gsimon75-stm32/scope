@@ -47,12 +47,15 @@ FUNCTION(adc_setup)
     orr r1, RCC_APB2ENR_IOPBEN
     str r1, [r0, RCC_APB2ENR]
 
-    // configure GPIOB1 as analog input
+    // configure GPIOB1 and GPIOB0 as analog input
     ldr r0, LOC({GPIOB_BASE})
     ldr r1, [r0, GPIO_CRL]
+    bic r1, heval(MASK(GPIO_CRL_MODE0) | MASK(GPIO_CRL_CNF0))
+    orr r1, heval(GPIO_MODE_INPUT << GPIO_CRL_MODE0_Shift)
+    orr r1, heval(GPIO_CNF_INPUT_ANALOG << GPIO_CRL_CNF0_Shift)
     bic r1, heval(MASK(GPIO_CRL_MODE1) | MASK(GPIO_CRL_CNF1))
     orr r1, heval(GPIO_MODE_INPUT << GPIO_CRL_MODE1_Shift)
-    orr r1, heval(GPIO_CNF_INPUT_ANALOG << GPIO_CRL_CNF3_Shift)
+    orr r1, heval(GPIO_CNF_INPUT_ANALOG << GPIO_CRL_CNF1_Shift)
     str r1, [r0, GPIO_CRL]
 
     // setup ADC1,2
@@ -69,8 +72,9 @@ FUNCTION(adc_setup)
     str r1, [r12, ADC_SQR1]
     str r1, [r12, ADC_SMPR2]
 
-    mov r1, 9                         // channel9
+    mov r1, 8                         // channel8 = PB0
     str r1, [rADC, ADC_SQR3]
+    mov r1, 9                         // channel9 = PB1
     str r1, [r12, ADC_SQR3]
 
     // set dual mode

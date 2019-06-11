@@ -55,7 +55,7 @@ void sighup_handler(int n) {
 }
 
 uint16_t
-resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
+resample_mono(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
     int trig_delay = (int)(1.5e-6 / raw_sampling_interval); // from trig event to 1st sample: approx 1.5 usec
     uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
     int sidx = 0, didx;
@@ -65,7 +65,7 @@ resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
         new_n = MAX_SAMPLES - trig_delay;
 
     for (didx = 0; didx < trig_delay; ++didx)
-        dst[didx] = 0;
+        dst[didx] = (didx & 1) ? 0xffff : 0;
 
     //fprintf(stderr, "resample from (n=%d, iv=%f) to (n=%d, iv=%f) \n", old_n, raw_sampling_interval * 1e6, new_n, sampling_interval * 1e6);
     while (didx < new_n) {
@@ -79,6 +79,37 @@ resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
         t -= raw_sampling_interval * skip;
     }
     //fprintf(stderr, "resample done, dst=%d, src=%d\n", didx, sidx);
+
+    return new_n;
+}
+
+uint16_t
+resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
+    const uint32_t *src2 = reinterpret_cast<const uint32_t*>(src);
+    uint32_t *dst2 = reinterpret_cast<uint32_t*>(dst);
+    //old_n >>= 1;
+
+    int trig_delay = (int)(2.5e-6 / raw_sampling_interval) / 2; // from trig event to 1st sample: approx 1.5 usec
+    uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
+    int sidx = 0, didx;
+    double t = 0;
+
+    if (new_n > (MAX_SAMPLES/2 - trig_delay))
+        new_n = MAX_SAMPLES/2 - trig_delay;
+
+    for (didx = 0; didx < trig_delay; ++didx)
+        dst2[didx] = 0;
+
+    while (didx < new_n) {
+        dst2[didx] = src2[sidx];
+        didx++;
+
+        t += sampling_interval;
+
+        int skip = (int)(t / raw_sampling_interval);
+        sidx += skip;
+        t -= raw_sampling_interval * skip;
+    }
 
     return new_n;
 }
@@ -174,7 +205,7 @@ main_loop(void *userdata) {
                 n = resample(resampled, num_samples, samples_analog);
                 add_analog_samples(n, &resampled[0]);
 
-                n = resample(resampled, num_samples, samples_digital);
+                n = resample_mono(resampled, num_samples, samples_digital);
                 add_digital_samples(n, &resampled[0]);
             }
             break;
