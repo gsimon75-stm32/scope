@@ -27,6 +27,8 @@ uint16_t pwm_duty = pwm_total / 2;
 // for adaptive increase/decrease
 int pwm_step = 1;
 int pwm_count = 0;
+bool duty_lock = false;
+double duty_ratio = 0.5;
 
 
 void
@@ -41,7 +43,9 @@ help(const char *myname) {
 
 void
 commit_pwm(void) {
-    fprintf(stderr, "pwm: %u/%u (step=%d, count=%d)\n", pwm_duty, pwm_total, pwm_step, pwm_count);
+    fprintf(stderr, "pwm: %u/%u (step=%d, count=%d) = (%u Hz %u %%)\n",
+            pwm_duty, pwm_total, pwm_step, pwm_count,
+            72000000 / pwm_total, 100*pwm_duty / pwm_total);
     set_pwm(pwm_total, pwm_duty);
     if (pwm_step < 100) {
         pwm_count++;
@@ -157,6 +161,12 @@ main(int argc, char **argv) {
                 }
                 break;
 
+                case SDLK_l:
+                duty_lock = !duty_lock;
+                printf("duty_lock = %d\n", duty_lock);
+                duty_ratio = ((double)pwm_duty) / pwm_total;
+                break;
+                      
                 case SDLK_s:
                 do_pause = false;
                 switch (trig_source) {
@@ -181,12 +191,16 @@ main(int argc, char **argv) {
                 if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_total < (65535 - pwm_step)) {
                         pwm_total += pwm_step;
+                        if (duty_lock)
+                            pwm_duty = (uint16_t)(pwm_total * duty_ratio);
                         commit_pwm();
                     }
                 }
                 else {
                     if (pwm_duty < (pwm_total - pwm_step)) {
                         pwm_duty += pwm_step;
+                        if (duty_lock)
+                            pwm_total = (uint16_t)(pwm_duty / duty_ratio);
                         commit_pwm();
                     }
                 }
@@ -197,12 +211,16 @@ main(int argc, char **argv) {
                 if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_total > (pwm_duty + pwm_step)) {
                         pwm_total -= pwm_step;
+                        if (duty_lock)
+                            pwm_duty = (uint16_t)(pwm_total * duty_ratio);
                         commit_pwm();
                     }
                 }
                 else {
                     if (pwm_duty > pwm_step) {
                         pwm_duty -= pwm_step;
+                        if (duty_lock)
+                            pwm_total = (uint16_t)(pwm_duty / duty_ratio);
                         commit_pwm();
                     }
                 }

@@ -45,6 +45,6 @@ stop:
 %.o:		%.s
 		$(AS) -o $@ $(ASFLAGS) $^
 
-test.elf:	rte/stm32f103.$(BUILD).ld rte/boot.o main.o usb.o st7789.o
+test.elf:	rte/stm32f103.$(BUILD).ld rte/boot.o main.o usb.o # st7789.o
 		$(LD) -n -T $(filter %.ld,$^) -o $@ $(filter %.o %.a,$^)
 

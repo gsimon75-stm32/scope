@@ -1,12 +1,11 @@
 include(stm32f10x.m4)
-include(st7789.m4)
 
 define({MAX_SAMPLES}, 2048)
-
 
 define({rADC}, r11)
 define({rDMA}, r10)
 define({rSTATE}, r9)
+
 define({STATE_MASK},                0xf8)
 define({STATE_IDLE},                0)
 define({STATE_WAIT_TRIG_ANALOG},    heval(1 << 3))
@@ -175,68 +174,6 @@ FUNCTION(tim2_setup)
 ENDFUNC // tim2_setup
 
 
-FUNCTION(test_screen)
-    push {{r0-r2, lr}}
-    ldr r0, LOC({X})
-    mov r1, 'A'
-    strh r1, [r0]
-
-    mov r0, 12   // row
-    mov r1, 18   // column
-    bl st7789_gotoxy
-
-    mov r1, 0
-    mov r0, 0xf800
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0x07e0
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0x001f
-    bl st7789_set_color
-    
-    adr r0, LOC(YADDA)
-    bl puts
-
-    mov r1, 0
-    mov r0, 0xffff
-    bl st7789_set_color
-    
-    mov r2, 0 // wait counter
-  LOC(QWER):
-    add r2, 1
-    cmp r2, 0x58000
-    blo LOC(QWER)
-
-    ldr r0, LOC({X})
-    bl puts
-    ldrb r2, [r0]
-    cmp r2, 'Z'
-    ite eq
-    moveq r2, 'A'
-    addne r2, 1
-    strb r2, [r0]
-
-    mov r2, 0   // clear wait counter
-    b LOC(QWER)
-
-    pop {{r0-r2, pc}}
-    
-  LOC(YADDA):               .string "Yadda Boo"
-  .align 4
-  LOC({X}):                 .word X
-
-ENDFUNC // test_screen
-
-
 FUNCTION(main)
     // enable interrupts
     ldr r0, LOC({NVIC_BASE})
@@ -273,8 +210,6 @@ FUNCTION(main)
     str r1, [r0, GPIO_CRL]
 
     bl usb_hw_setup
-    bl st7789_setup
-    bl st7789_initialise
 
     ldr rDMA, LOC({DMA1_BASE})
 
@@ -583,33 +518,12 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     b LOC(DONE)
 
   LOC(EVENT_1):
-    push {{r0}}
-    adr r0, LOC(WHAT)
-    bl puts
-    pop {{r0}}
     b LOC(DONE)
   
   LOC(EVENT_2):
-    push {{r0}}
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_MADCTL)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00)
-    ST7789_MODE(0)
-    pop {{r0}}
     b LOC(DONE)
   
   LOC(EVENT_3):
-    push {{r0}}
-    ST7789_MODE(0)
-    ST7789_SEND(ST7789_CMD_RDDID)
-    ST7789_MODE(1)
-    ST7789_SEND(0x00)
-    ST7789_SEND(0x00)
-    ST7789_SEND(0x00)
-    ST7789_SEND(0x00)
-    ST7789_MODE(0)
-    pop {{r0}}
     b LOC(DONE)
   
   LOC(EVENT_4):
@@ -620,7 +534,6 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
   LOC(NUM_SAMPLES):         .word num_samples
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({TIM2_BASE}):         .word TIM2_BASE
-  LOC(WHAT):                .string "what?"
   .align(4)
 ENDFUNC // usb_ep1_rx_notify
 
