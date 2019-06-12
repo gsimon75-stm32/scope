@@ -77,6 +77,47 @@ FUNCTION(adc_setup)
     mov r1, 9                         // channel9 = PB1
     str r1, [r12, ADC_SQR3]
 
+    // ---- calibration start
+    // switch on the ADCs
+    mov r1, heval(ADC_CR2_CAL + ADC_CR2_ADON)
+    str r1, [rADC, ADC_CR2]
+    str r1, [r12, ADC_CR2]
+
+   // wait tstab here
+    mov r2, 140
+  LOC(WAIT_TSTAB_CAL):
+    subs r2, 1
+    bne LOC(WAIT_TSTAB_CAL)
+
+    // do a calibration sampling
+    mov r1, heval(ADC_CR2_CAL + ADC_CR2_ADON)
+    str r1, [rADC, ADC_CR2]
+    str r1, [r12, ADC_CR2]
+
+  LOC(WAIT_CAL1):
+    ldr r1, [rADC, ADC_CR2]
+    tst r1, ADC_CR2_CAL
+    bne LOC(WAIT_CAL1)
+
+    ldr r2, [rADC, ADC_DR]
+
+  LOC(WAIT_CAL2):
+    ldr r1, [r12, ADC_CR2]
+    tst r1, ADC_CR2_CAL
+    bne LOC(WAIT_CAL2)
+
+    ldr r1, [r12, ADC_DR]
+    lsl r1, 16
+    orr r2, r1
+
+    ldr r1, LOC({CALIBRATION})  // just for debugging, we won't need it, as the data is already compensated
+    str r2, [r1]
+
+    mov r1, 0
+    str r1, [rADC, ADC_CR2]           // shut down adc1
+    str r1, [r12, ADC_CR2]            // shut down adc2
+    // ---- calibration end
+
     // set dual mode
     mov r1, heval(7 << ADC_CR1_DUALMOD_Shift)
     str r1, [rADC, ADC_CR1]
@@ -99,6 +140,7 @@ FUNCTION(adc_setup)
   LOC({RCC_BASE}):      .word RCC_BASE
   LOC({GPIOB_BASE}):    .word GPIOB_BASE
   LOC({ADC2_BASE}):     .word ADC2_BASE
+  LOC({CALIBRATION}):   .word calibration
 ENDFUNC // adc_setup
 
 
@@ -547,10 +589,9 @@ ENDFUNC // usb_ep1_rx_notify
 
 // --------------------------------------------------------------------------
     .section .data
-
-X           .hword 0
     .align 4
 
+calibration .word 0     // low hword is for ADC0, high hword is for ADC1 (just like ADC_DR)
 trig_level  .hword 0
 num_samples .hword 0
     .align 4

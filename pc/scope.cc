@@ -90,8 +90,10 @@ main(int argc, char **argv) {
 
     init_ui();
     init_screen();
-    if (!init_device("/dev/ttyUSB1"))
+    if (!init_device()) {
+        fprintf(stderr, "Could not open device\n");
         cmd = scope_command_t::QUIT;
+    }
 
     set_sample_rate(sample_rate);
     set_trig_dir(trig_direction_t::RISING);

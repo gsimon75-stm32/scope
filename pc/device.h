@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "common.h"
 
-bool init_device(const char *devname);
+bool init_device();
 void set_sample_rate(uint8_t n);
 void set_trig_level(uint8_t n);
 void set_trig_dir(uint8_t n);

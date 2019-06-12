@@ -301,7 +301,7 @@ check_device_string(int id, const char *shouldbe) {
 }
 
 bool
-init_device(const char *devname) {
+init_device(void) {
     int res;
 
     res = libusb_init(&ctx);
