@@ -94,16 +94,17 @@ main(int argc, char **argv) {
         fprintf(stderr, "Could not open device\n");
         cmd = scope_command_t::QUIT;
     }
+    else {
+        set_sample_rate(sample_rate);
+        set_trig_dir(trig_direction_t::RISING);
+        set_trig_source(trig_source_t::ANALOG);
+        set_trig_level(0x80);
+        commit_pwm();
 
-    set_sample_rate(sample_rate);
-    set_trig_dir(trig_direction_t::RISING);
-    set_trig_source(trig_source_t::ANALOG);
-    set_trig_level(0x80);
-    commit_pwm();
-
-    redraw_time_scale();
-    //redraw_voltage_scale(voltages[voltage_ref]);
-    redraw_trig_marker();
+        redraw_time_scale();
+        //redraw_voltage_scale(voltages[voltage_ref]);
+        redraw_trig_marker();
+    }
 
     while (cmd != scope_command_t::QUIT) {
         SDL_Event e;
