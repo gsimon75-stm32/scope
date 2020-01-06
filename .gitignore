@@ -1,3 +1,5 @@
 test.elf
 *.o
+*.s
+pc/scope
 

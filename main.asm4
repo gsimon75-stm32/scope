@@ -1,4 +1,5 @@
 include(stm32f10x.m4)
+include(usb.m4)
 
 define({MAX_SAMPLES}, 2048)
 
@@ -152,7 +153,8 @@ FUNCTION(adc_configure)
     ldr r1, [r0, RCC_CFGR]
     mov r3, MASK(RCC_CFGR_ADCPRE)       // FIXME: simplify
     bic r1, r3
-    lsl r3, r2, RCC_CFGR_ADCPRE_Shift
+    and r3, r2, 0x03
+    lsl r3, RCC_CFGR_ADCPRE_Shift
     orr r1, r3
     str r1, [r0, RCC_CFGR]
     pop {{r0, r1, r3, pc}}
@@ -448,6 +450,10 @@ FUNCTION(usb_ep1_tx_complete)    // dev -> host
     pop {{r1, r2, pc}}
 ENDFUNC // usb_ep1_tx_complete
 
+// USB_REQ_TYPE_VENDOR + USB_REQ_RECIPIENT_ENDPOINT = 0x42, ... + USB_REQ_DIR_OUT = 0xc2
+define({USB_VENDOR_REQ_SWEEP}, 0x53c2)
+define({USB_VENDOR_REQ_PWM}, 0x5042)
+define({USB_VENDOR_REQ_EVENT}, 0x4542)
 
 FUNCTION(usb_ep1_rx_notify)    // host -> dev
     // In:  r0 = USB_BASE
@@ -460,19 +466,22 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     blo LOC(DONE)
     
     // message          byte0,byte1     byte2,byte3   byte4,byte5   byte6,byte7
-    //                  CMD
+    //                  RQTYPE,RQ       VALUE L,H     INDEX L,H     LENGTH L,H
     //
-    // sweep            'S',trig+adcpsc #samples      trig level
-    // pwm              'P'   N/A       total         duty
-    // event            'E'   n
+    // sweep            ...,'S'         adcpsc,trig   trig level    #samples
+    // pwm              ...,'P'         total         duty
+    // event            ...,'E'         n
 
     ldr r3, LOC(RXBUF)
-    ldrb r2, [r3]               // byte0 = CMD
-    cmp r2, 'S'
+    ldrh r2, [r3, USB_PKT_SETUP_REQTYPE] // reqtype,req = CMD
+    mov r4, USB_VENDOR_REQ_SWEEP
+    cmp r2, r4
     beq LOC(PREPARE_SWEEP)
-    cmp r2, 'P'
+    mov r4, USB_VENDOR_REQ_PWM
+    cmp r2, r4
     beq LOC(PWM)
-    cmp r2, 'E'
+    mov r4, USB_VENDOR_REQ_EVENT
+    cmp r2, r4
     beq LOC(EVENT)
 
   LOC(DONE):
@@ -485,8 +494,8 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     pop {{r0-r5, pc}}
  
  LOC(PREPARE_SWEEP):
-    // process byte2,3: num of samples
-    ldrh r2, [r3, 4]
+    // process wLength: num of samples
+    ldrh r2, [r3, USB_PKT_SETUP_LENGTH]
     // clamp down to MAX_SAMPLES
     mov r4, MAX_SAMPLES
     cmp r2, r4
@@ -504,22 +513,31 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     add r4, r5
     str r4, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
     
-    // process byte4,5: trig level
-    ldrh r2, [r3, 8]
+    // process wIndex: trig level
+    ldrh r2, [r3, USB_PKT_SETUP_INDEX]
     // clamp down to 0x0fff
     bic r2, 0xf000
     ldr r4, LOC({TRIG_LEVEL})
     strh r2, [r4]
     
-    // process byte1: bit7,6: adc prescaler, bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
-    ldrh r2, [r3, 1]
-    and rSTATE, r2, 0x1f
-    lsr r2, 6
+    // process valueH: bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
+    ldrb r2, [r3, USB_PKT_SETUP_VALUE_H]
+    and rSTATE, r2, 0x1f ; trig source and states-to-skip
+
+    // process valueL: adc prescaler
+    ldrb r2, [r3, USB_PKT_SETUP_VALUE_L]
+    // FIXME: use all fields of r2:
+    // - bit 7: 'fast interleaved' mode vs. 'regular simultaneous' mode (ADC_CR1.DUALMOD 0111 vs 0110)
+    // - bits 4..2: sampling time (ADC_SMPR2)
+    // - bits 1,0: prescaler value (RCC_CFGR.ADCPRE)
+    // - set the total conversion cycles num to r5
     bl adc_configure
-    // timer counter = 14 * (prescaler + 1) - 1 = 14 * prescaler + 13
+    and r4, r2, 0x03    // prescaler value
     mov r5, 14
-    mul r5, r2
-    add r5, 13
+    // timer counter = 14 * (prescaler + 1) - 1
+    add r4, 1
+    mul r5, r4
+    sub r5, 1
     
     // start digital sweep: setup timer but don't enable it yet
     ldr r4, LOC({TIM1_BASE})
@@ -541,18 +559,18 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
 
    
   LOC(PWM):
-    // process byte2,3: pwm total time
+    // process wValue: pwm total time
     ldr r4, LOC({TIM2_BASE})
-    ldrh r2, [r3, 4]
+    ldrh r2, [r3, USB_PKT_SETUP_VALUE]
     str r2, [r4, TIM_ARR]
-    // process byte4,5: pwm duty time
-    ldrh r2, [r3, 8]
+    // process wIndex: pwm duty time
+    ldrh r2, [r3, USB_PKT_SETUP_INDEX]
     str r2, [r4, TIM_CCR1]
     b LOC(DONE)
 
  LOC(EVENT):
     // process byte1: custom event idx
-    ldrb r2, [r3, 1] 
+    ldrb r2, [r3, USB_PKT_SETUP_VALUE_L] 
     cmp r2, 1
     beq LOC(EVENT_1)
     cmp r2, 2

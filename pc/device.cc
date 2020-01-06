@@ -147,8 +147,8 @@ main_loop(void *userdata) {
         switch (cmd) {
             case scope_command_t::SEND_PWM: {
                 cmd = scope_command_t::NORMAL;
-                request[0] = 'P'; // command: pwm
-                request[1] = 0;
+                request[0] = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
+                request[1] = 'P'; // command: pwm
                 request[2] = ( send_pwm_total       & 0xff);
                 request[3] = ((send_pwm_total >> 8) & 0xff);
                 request[4] = ( send_pwm_duty        & 0xff);
@@ -165,9 +165,9 @@ main_loop(void *userdata) {
 
             case scope_command_t::SEND_CUSTOM_EVENT: {
                 cmd = scope_command_t::NORMAL;
-                request[0] = 'E'; // command: pwm
-                request[1] = custom_event_idx;
-                request[2] = 0;
+                request[0] = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
+                request[1] = 'E'; // command: event
+                request[2] = custom_event_idx;
                 request[3] = 0;
                 request[4] = 0;
                 request[5] = 0;
@@ -182,14 +182,14 @@ main_loop(void *userdata) {
             break;
 
             case scope_command_t::NORMAL: {
-                request[0] = 'S'; // command: sweep
-                request[1] = ((sample_rate & 3) << 6) + trig_dir + trig_source;
-                request[2] = ( num_samples       & 0xff);
-                request[3] = ((num_samples >> 8) & 0xff);
+                request[0] = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
+                request[1] = 'S'; // command: sweep
+                request[2] = sample_rate & 3;
+                request[3] = trig_dir + trig_source;
                 request[4] = ( (trig_level << 4)        & 0xff);
                 request[5] = (((trig_level << 4)  >> 8) & 0xff);
-                request[6] = 0;
-                request[7] = 0;
+                request[6] = ( num_samples       & 0xff);
+                request[7] = ((num_samples >> 8) & 0xff);
 
                 n = 0;
                 res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
