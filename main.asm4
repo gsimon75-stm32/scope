@@ -146,19 +146,41 @@ ENDFUNC // adc_setup
 
 
 FUNCTION(adc_configure)
-    // In: r2 = 2 bits prescaler
+    // In: r2 = 
+    // - bit 7: 1='fast interleaved' mode vs. 0='regular simultaneous' mode (ADC_CR1.DUALMOD 0111 vs 0110)
+    // - bits 4..2: sampling time (ADC_SMPRn.SMPm)
+    // - bits 1,0: prescaler value (RCC_CFGR.ADCPRE)
     push {{r0, r1, r3, lr}}
+    
     // set ADC prescaler
     ldr r0, LOC({RCC_BASE})
     ldr r1, [r0, RCC_CFGR]
     mov r3, MASK(RCC_CFGR_ADCPRE)       // FIXME: simplify
     bic r1, r3
     and r3, r2, 0x03
-    lsl r3, RCC_CFGR_ADCPRE_Shift
-    orr r1, r3
+    orr r1, r1, r3, LSL RCC_CFGR_ADCPRE_Shift
     str r1, [r0, RCC_CFGR]
+
+    // set dual mode
+    ldr r1, [rADC, ADC_CR1]
+    tst r2, 0x80
+    ite eq
+    biceq r1, heval(1 << ADC_CR1_DUALMOD_Shift)
+    orrne r1, heval(1 << ADC_CR1_DUALMOD_Shift)
+    str r1, [rADC, ADC_CR1]
+
+    // set sampling time
+    lsr r3, r2, 2
+    and r3, 7
+    ldr r0, LOC({ADC2_BASE})
+    lsl r1, r3, ADC_SMPR2_SMP8_Shift
+    str r1, [rADC, ADC_SMPR2]           // channel 8
+    lsl r1, r3, ADC_SMPR2_SMP9_Shift
+    str r1, [r0, ADC_SMPR2]             // channel 9
+
     pop {{r0, r1, r3, pc}}
   LOC({RCC_BASE}):      .word RCC_BASE
+  LOC({ADC2_BASE}):     .word ADC2_BASE
 ENDFUNC // adc_configure
 
 
@@ -526,17 +548,20 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
 
     // process valueL: adc prescaler
     ldrb r2, [r3, USB_PKT_SETUP_VALUE_L]
-    // FIXME: use all fields of r2:
     // - bit 7: 'fast interleaved' mode vs. 'regular simultaneous' mode (ADC_CR1.DUALMOD 0111 vs 0110)
-    // - bits 4..2: sampling time (ADC_SMPR2)
+    // - bits 4..2: sampling time (ADC_SMPRn.SMPm)
     // - bits 1,0: prescaler value (RCC_CFGR.ADCPRE)
-    // - set the total conversion cycles num to r5
     bl adc_configure
-    and r4, r2, 0x03    // prescaler value
-    mov r5, 14
-    // timer counter = 14 * (prescaler + 1) - 1
-    add r4, 1
-    mul r5, r4
+    lsr r4, r2, 2
+    and r4, 7       // sampling time index
+    and r2, 3       // prescaler value
+
+    adr r5, LOC(ADC_CONV_TIMES)
+    ldrb r5, [r5, r4]   // total conversion time in cycles
+
+    // timer counter = total_conv_time * (prescaler + 1) - 1
+    add r2, 1
+    mul r5, r2
     sub r5, 1
     
     // start digital sweep: setup timer but don't enable it yet
@@ -598,6 +623,11 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
   LOC(NUM_SAMPLES):         .word num_samples
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({TIM2_BASE}):         .word TIM2_BASE
+  
+  // Total conversion time = sampling + 12.5 cycles
+  // Sampling times (selected by ADC_SMPRn.SMPm): 1.5, 7.5, 13.5, 28.5, 41.5, 55.5, 71.5, 239.5 cycles
+  // So the total conversion times:
+  LOC(ADC_CONV_TIMES):      .byte 14, 20, 26, 41, 54, 68, 84, 252
   .align(4)
 ENDFUNC // usb_ep1_rx_notify
 

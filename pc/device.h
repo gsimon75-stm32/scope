@@ -5,7 +5,7 @@
 #include "common.h"
 
 bool init_device();
-void set_sample_rate(uint8_t n);
+void set_sampling_preset(uint8_t n);
 void set_trig_level(uint8_t n);
 void set_trig_dir(uint8_t n);
 void set_trig_source(uint8_t n);

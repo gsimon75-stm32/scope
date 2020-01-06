@@ -17,7 +17,7 @@
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
-uint8_t sample_rate = 3;
+uint8_t current_sampling_preset = 0;
 uint8_t trig_dir = trig_direction_t::RISING;
 uint8_t trig_source = trig_source_t::ANALOG;
 uint8_t trig_level = 0x80;
@@ -35,7 +35,7 @@ void
 help(const char *myname) {
     printf("Usage: %s [options]\n", myname);
     printf("  -h | --help\n");
-    printf("  -r | --rate n             Sample Rate, 0..7\n");
+    printf("  -r | --rate n             Sample Rate, 0..3\n");
     printf("  -d | --trig-dir n         Trig Direction, 7=off, 4=rising, 1=falling\n");
     printf("  -s | --trig-src n         Trig Source, 0=off, 8=analog, 16=digital\n");
     printf("  -l | --trig-level n       Trig Level, 0..255\n");
@@ -72,7 +72,7 @@ main(int argc, char **argv) {
     while ((i = getopt_long(argc, argv, "hr:d:s:l:", longopts, NULL)) != -1) {
         switch (i) {
             case 'h': help(argv[0]); return 0;
-            case 'r': sample_rate = strtol(optarg, NULL, 0); break;
+            case 'r': current_sampling_preset = strtol(optarg, NULL, 0); break;
             case 'd': trig_dir = strtol(optarg, NULL, 0); break;
             case 's': trig_source = strtol(optarg, NULL, 0); break;
             case 'l': trig_level = strtol(optarg, NULL, 0); break;
@@ -95,7 +95,7 @@ main(int argc, char **argv) {
         cmd = scope_command_t::QUIT;
     }
     else {
-        set_sample_rate(sample_rate);
+        set_sampling_preset(0);
         set_trig_dir(trig_direction_t::RISING);
         set_trig_source(trig_source_t::ANALOG);
         set_trig_level(0x80);
@@ -130,19 +130,13 @@ main(int argc, char **argv) {
 
                 case SDLK_LEFT:
                 do_pause = false;
-                switch (sample_rate) {
-                    case 1: set_sample_rate(0); break;
-                    case 3: set_sample_rate(1); break;
-                }
+                set_sampling_preset((current_sampling_preset + 3 - 1) % 3);
                 redraw_time_scale();
                 break;
 
                 case SDLK_RIGHT:
                 do_pause = false;
-                switch (sample_rate) {
-                    case 0: set_sample_rate(1); break;
-                    case 1: set_sample_rate(3); break;
-                }
+                set_sampling_preset((current_sampling_preset + 1) % 3);
                 redraw_time_scale();
                 break;
 

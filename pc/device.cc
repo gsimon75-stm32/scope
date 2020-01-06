@@ -30,7 +30,7 @@ double                  sampling_interval;
 uint16_t                resampled[MAX_SAMPLES];
 double                  raw_sampling_interval;
 
-uint8_t                 cmd = scope_command_t::NORMAL;
+uint8_t                 cmd = scope_command_t::SWEEP;
 bool                    do_pause = false;
 uint16_t                send_pwm_total, send_pwm_duty;
 uint8_t                 custom_event_idx;
@@ -146,7 +146,7 @@ main_loop(void *userdata) {
 
         switch (cmd) {
             case scope_command_t::SEND_PWM: {
-                cmd = scope_command_t::NORMAL;
+                cmd = scope_command_t::SWEEP;
                 request[0] = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
                 request[1] = 'P'; // command: pwm
                 request[2] = ( send_pwm_total       & 0xff);
@@ -164,7 +164,7 @@ main_loop(void *userdata) {
             break;
 
             case scope_command_t::SEND_CUSTOM_EVENT: {
-                cmd = scope_command_t::NORMAL;
+                cmd = scope_command_t::SWEEP;
                 request[0] = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
                 request[1] = 'E'; // command: event
                 request[2] = custom_event_idx;
@@ -181,10 +181,11 @@ main_loop(void *userdata) {
             }
             break;
 
-            case scope_command_t::NORMAL: {
+            case scope_command_t::SWEEP: {
+                sampling_preset_t *s = &(sampling_presets[current_sampling_preset]);
                 request[0] = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
                 request[1] = 'S'; // command: sweep
-                request[2] = sample_rate & 3;
+                request[2] = (s->is_interleaved ? 0x80 : 0) |  ((s->sampling_time_idx & 7) << 2) | (s->sample_rate & 3);
                 request[3] = trig_dir + trig_source;
                 request[4] = ( (trig_level << 4)        & 0xff);
                 request[5] = (((trig_level << 4)  >> 8) & 0xff);
@@ -217,11 +218,19 @@ main_loop(void *userdata) {
     return nullptr;
 }
 
+sampling_preset_t sampling_presets[] = {
+    { true, 0, 0,  20e-8 },
+    { true, 0, 1,  50e-8 },
+    { true, 0, 3, 100e-8 }
+};
 
 void
-set_sample_rate(uint8_t n) {
-    printf("sample_rate=%d\n", n);
-    sample_rate = n;
+set_sampling_preset(uint8_t n) {
+    printf("sampling_preset=%d\n", n);
+    current_sampling_preset = n;
+
+    sampling_preset_t *s = &(sampling_presets[current_sampling_preset]);
+
     // minimal conversion interval in nsec
     static double base = 1000.0 * 7 / 72;
     // 72 is the CPU freq in MHz, conversion interval is 7 clks
@@ -229,15 +238,10 @@ set_sample_rate(uint8_t n) {
     // so 1000 times that is in nsec
 
     // prescaler values for 0..3 are 2, 4, 6, 8, that is, 2*(n+1)
-    sampling_interval = 2 * (sample_rate + 1) * base * 1e-9;
+    raw_sampling_interval = 2 * (s->sample_rate + 1) * base * 1e-9;
 
-    raw_sampling_interval = sampling_interval;
     // will be resampled to these rates
-    switch (sample_rate) {
-        case 0: sampling_interval =  20e-8; break;
-        case 1: sampling_interval =  50e-8; break;
-        case 3: sampling_interval = 100e-8; break;
-    }
+    sampling_interval = s->sampling_interval;
 
     pthread_kill(thr_sampling, SIGUSR1);
 }
@@ -264,7 +268,7 @@ set_trig_source(uint8_t n) {
 }
 
 void set_pwm(uint16_t total, uint16_t duty) {
-    while (cmd != scope_command_t::NORMAL)
+    while (cmd != scope_command_t::SWEEP)
         ;
     send_pwm_total = total;
     send_pwm_duty = duty;
@@ -273,7 +277,7 @@ void set_pwm(uint16_t total, uint16_t duty) {
 }
 
 void send_custom_event(uint8_t n) {
-    while (cmd != scope_command_t::NORMAL)
+    while (cmd != scope_command_t::SWEEP)
         ;
     custom_event_idx = n;
     cmd = scope_command_t::SEND_CUSTOM_EVENT;

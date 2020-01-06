@@ -59,7 +59,7 @@ extern uint32_t user_event_type_base;
 struct scope_command_t {
     enum {
         QUIT                = 0,
-        NORMAL              = 1,
+        SWEEP               = 1,
         SEND_PWM            = 2,
         SEND_CUSTOM_EVENT   = 3,
     };
@@ -83,7 +83,15 @@ struct trig_source_t {
     };
 };
 
-extern uint8_t trig_dir, trig_source, trig_level, sample_rate;
+struct sampling_preset_t {
+    bool is_interleaved;
+    uint8_t sampling_time_idx;
+    uint8_t sample_rate;
+    double sampling_interval;
+};
+
+extern uint8_t trig_dir, trig_source, trig_level, current_sampling_preset;
+extern sampling_preset_t sampling_presets[];
 extern double raw_sampling_interval, sampling_interval;
 
 #endif // COMMON_H
