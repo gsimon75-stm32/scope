@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
+#include <sys/endian.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -17,23 +18,79 @@
 
 #include <libusb.h>
 
-#define MAX_SAMPLES     1200
+#define MAX_SAMPLES     2000
 #define SAMPLING_OVERHEAD_TIME 1.8e-6
 
 libusb_context          *ctx;
 libusb_device           **devices;
 libusb_device_handle    *dh;
 
-uint16_t                num_samples = 1028;
-uint16_t                samples[2 * MAX_SAMPLES];
-double                  sampling_interval;
-uint16_t                resampled[MAX_SAMPLES];
+uint8_t                 raw_samples_data[5 * MAX_SAMPLES];
+
+uint16_t                num_raw_samples = 1028;
 double                  raw_sampling_interval;
+sample_t                raw_samples[MAX_SAMPLES];
+
+uint16_t                num_samples;
+double                  sampling_interval;
+sample_t                samples[MAX_SAMPLES];
 
 uint8_t                 cmd = scope_command_t::SWEEP;
 bool                    do_pause = false;
 uint16_t                send_pwm_total, send_pwm_duty;
 uint8_t                 custom_event_idx;
+
+const sampling_preset_t sampling_presets[] = {
+  //            intrleaved, sidx,   psc,    s.interval, raw s.intv.
+  /* [0] */   { true,       0,      0,      200e-9 }, // 389e-9 / 2 (because of the interleaved sampling and the single channel)
+  /* [1] */   { false,      0,      0,      500e-9 }, // 389e-9
+  /* [2] */   { false,      0,      1,        1e-6 }, // 778e-9
+  /* [3] */   { false,      1,      2,        2e-6 }, // 1.67e-6
+  /* [4] */   { false,      4,      2,        5e-6 }, // 4.5e-6
+  /* [5] */   { false,      6,      2,       10e-6 }, // 7e-6
+  /* [6] */   { false,      7,      1,       20e-6 }, // 14e-6
+  /* [7] */   { false,      7,      3,       50e-6 }, // 28e-6
+
+  /*
+  { false,      0,      0,      500e-9 }, // 389e-9
+  { false,      1,      0,        1e-6 }, // 556e-9
+  { false,      2,      0,        1e-6 }, // 722e-9
+  { false,      3,      0,        2e-6 }, // 1.14e-6
+  { false,      4,      0,        2e-6 }, // 1.5e-6
+  { false,      5,      0,        2e-6 }, // 1.89e-6
+  { false,      6,      0,        5e-6 }, // 2.3e-6
+  { false,      7,      0,       10e-6 }, // 7e-6
+
+  { false,      0,      1,        1e-6 }, // 778e-9
+  { false,      1,      1,        2e-6 }, // 1.11e-6
+  { false,      2,      1,        2e-6 }, // 1.44e-6
+  { false,      3,      1,        5e-6 }, // 2.28e-6
+  { false,      4,      1,        5e-6 }, // 3e-6
+  { false,      5,      1,        5e-6 }, // 3.78e-6
+  { false,      6,      1,        5e-6 }, // 4.67e-6
+  { false,      7,      1,       20e-6 }, // 14e-6
+
+  { false,      0,      2,        2e-6 }, // 1.17e-6
+  { false,      1,      2,        2e-6 }, // 1.67e-6
+  { false,      2,      2,        5e-6 }, // 2.17e-6
+  { false,      3,      2,        5e-6 }, // 3.42e-6
+  { false,      4,      2,        5e-6 }, // 4.5e-6
+  { false,      5,      2,       10e-6 }, // 5.67e-6
+  { false,      6,      2,       10e-6 }, // 7e-6
+  { false,      7,      2,       50e-6 }, // 21e-6
+
+  { false,      0,      3,        2e-6 }, // 1.56e-6
+  { false,      1,      3,        5e-6 }, // 2.22e-6
+  { false,      2,      3,        5e-6 }, // 2.89e-6
+  { false,      3,      3,        5e-6 }, // 4.56e-6
+  { false,      4,      3,       10e-6 }, // 6e-6
+  { false,      5,      3,       10e-6 }, // 7.56e-6
+  { false,      6,      3,       10e-6 }, // 9.3e-6
+  { false,      7,      3,       50e-6 }, // 28e-6
+  */
+};
+const sampling_preset_t *current_sampling_preset = &sampling_presets[0];
+const int NUM_SAMPLING_PRESETS = sizeof(sampling_presets) / sizeof(sampling_presets[0]);
 
 #define VENDOR  0x5AFE
 #define PRODUCT 0x7E57
@@ -54,68 +111,6 @@ void sighup_handler(int n) {
     //fprintf(stderr, "SIGHUP caught: %p\n", pthread_self());
     cmd = scope_command_t::QUIT;
 }
-
-uint16_t
-resample_mono(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
-    int trig_delay = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval); // from trig event to 1st sample
-    uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
-    int sidx = 0, didx;
-    double t = 0;
-
-    if (new_n > (MAX_SAMPLES - trig_delay))
-        new_n = MAX_SAMPLES - trig_delay;
-
-    for (didx = 0; didx < trig_delay; ++didx)
-        dst[didx] = (didx & 1) ? 0xffff : 0;
-
-    //fprintf(stderr, "resample from (n=%d, iv=%f) to (n=%d, iv=%f) \n", old_n, raw_sampling_interval * 1e6, new_n, sampling_interval * 1e6);
-    while (didx < new_n) {
-        dst[didx] = src[sidx];
-        didx++;
-
-        t += sampling_interval;
-
-        int skip = (int)(t / raw_sampling_interval);
-        sidx += skip;
-        t -= raw_sampling_interval * skip;
-    }
-    //fprintf(stderr, "resample done, dst=%d, src=%d\n", didx, sidx);
-
-    return new_n;
-}
-
-uint16_t
-resample(uint16_t *dst, uint16_t old_n, const uint16_t *src) {
-    // dual channel -> 2 uint32_t-s stick together while rescaling
-    const uint32_t *src2 = reinterpret_cast<const uint32_t*>(src);
-    uint32_t *dst2 = reinterpret_cast<uint32_t*>(dst);
-    old_n >>= 1;
-
-    int trig_delay = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval) / 2; // from trig event to 1st sample
-    uint16_t new_n = (int)(old_n * raw_sampling_interval / sampling_interval);
-    int sidx = 0, didx;
-    double t = 0;
-
-    if (new_n > (MAX_SAMPLES/2 - trig_delay))
-        new_n = MAX_SAMPLES/2 - trig_delay;
-
-    for (didx = 0; didx < trig_delay; ++didx)
-        dst2[didx] = 0;
-
-    while (didx < new_n) {
-        dst2[didx] = src2[sidx];
-        didx++;
-
-        t += sampling_interval;
-
-        int skip = (int)(t / raw_sampling_interval);
-        sidx += skip;
-        t -= raw_sampling_interval * skip;
-    }
-
-    return new_n * 2;
-}
-
 
 void*
 main_loop(void *userdata) {
@@ -182,34 +177,115 @@ main_loop(void *userdata) {
             break;
 
             case scope_command_t::SWEEP: {
-                sampling_preset_t *s = &(sampling_presets[current_sampling_preset]);
+                num_raw_samples = (int)(1024 * sampling_interval / raw_sampling_interval);
                 request[0] = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT;
                 request[1] = 'S'; // command: sweep
-                request[2] = (s->is_interleaved ? 0x80 : 0) |  ((s->sampling_time_idx & 7) << 2) | (s->sample_rate & 3);
+                request[2] = (current_sampling_preset->is_interleaved ? 0x80 : 0) |  ((current_sampling_preset->sampling_time_idx & 7) << 2) | (current_sampling_preset->sample_rate & 3);
                 request[3] = trig_dir + trig_source;
                 request[4] = ( (trig_level << 4)        & 0xff);
                 request[5] = (((trig_level << 4)  >> 8) & 0xff);
-                request[6] = ( num_samples       & 0xff);
-                request[7] = ((num_samples >> 8) & 0xff);
+                request[6] = ( num_raw_samples       & 0xff);
+                request[7] = ((num_raw_samples >> 8) & 0xff);
 
                 n = 0;
                 res = libusb_bulk_transfer(dh, 0x01, request, 8, &n, 1000);
                 if (res != LIBUSB_SUCCESS) // FIXME: could not send data
                     continue;
 
+                int data_len = num_raw_samples * (current_sampling_preset->is_interleaved ? 3 : 5);
                 n = 0;
-                res = libusb_bulk_transfer(dh, 0x81, (unsigned char*)samples, 2 * num_samples * sizeof(samples[0]), &n, 0);
+                res = libusb_bulk_transfer(dh, 0x81, raw_samples_data, data_len, &n, 0);
                 //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
                 if (res != LIBUSB_SUCCESS) // FIXME: reception error
                     continue;
 
-                uint16_t *samples_analog = &(samples[0]);
-                uint16_t *samples_digital = &(samples[num_samples]);
-                n = resample(resampled, num_samples, samples_analog);
-                add_analog_samples(n, &resampled[0]);
+                // pad with zero-samples to represent the sampling overhead time (from trig to 0th sample)
+                n = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval);
+                for (int i = 0; i < n; ++i) {
+                    raw_samples[i].analog[0] = raw_samples[i].analog[1] = 0;
+                    raw_samples[i].digital = 0;
+                }
+                num_raw_samples += n;
 
-                n = resample_mono(resampled, num_samples, samples_digital);
-                add_digital_samples(n, &resampled[0]);
+                // split raw samples' data to (structured) samples
+                uint8_t *p = raw_samples_data;
+                if (current_sampling_preset->is_interleaved) {
+                    // NOTE: This mode is used for sampling the *same* signal with two channels, interleaving the sampling times,
+                    // so what we have here is a 'mono' signal represented as a 'stereo' with half the length.
+                    for (int i = n; i < num_raw_samples; i += 2, p += 4) {
+                        raw_samples[i].analog[0] = raw_samples[i].analog[1] = le16dec(p);
+                        raw_samples[i + 1].analog[0] = raw_samples[i + 1].analog[1] = le16dec(p + 2);
+                    }
+                    for (int i = n; i < num_raw_samples; ++i, ++p) {
+                        raw_samples[i].digital = *p;
+                    }
+                }
+                else {
+                    for (int i = n; i < num_raw_samples; ++i, p += 4) {
+                        raw_samples[i].analog[0] = le16dec(p);
+                        raw_samples[i].analog[1] = le16dec(p + 2);
+                    }
+                    for (int i = n; i < num_raw_samples; ++i, ++p) {
+                        raw_samples[i].digital = *p;
+                    }
+                }
+
+                // Resample the data to get a desired sampling rate
+                num_samples = (int)(num_raw_samples * raw_sampling_interval / sampling_interval);
+
+                //printf("num_raw_samples=%d, raw_sampling_interval=%lg, num_samples=%d, sampling_interval=%lg\n", num_raw_samples, raw_sampling_interval, num_samples, sampling_interval);
+                int src = 0; // source sample index
+                int dst = 0; // dest sample index
+                double t = 0; // time processed so far
+                double i_analog[2], i_digital[8]; // cumulative integrals (values integrated so far)
+                for (int i = 0; i < 2; ++i) {
+                    i_analog[i] = 0;
+                }
+                for (int i = 0; i < 8; ++i) {
+                    i_digital[i] = 0;
+                }
+
+                while ((src < num_raw_samples) && (dst < num_samples)) {
+                    //printf("src=%d, dst=%d, t=%lg\n", src, dst, t);
+
+                    /* generate as many output as we can from the samples we integrated */
+                    while ((t >= sampling_interval) && (dst < num_samples)) {
+                        //printf("i_analog[0]/t = %lg\n", i_analog[0] / t);
+                        for (int i = 0; i < 2; ++i) {
+                            double d = i_analog[i] / t;
+
+                            i_analog[i] -= d * sampling_interval;
+                            samples[dst].analog[i] = d;
+                        }
+                        samples[dst].digital = 0;
+                        for (int i = 0; i < 8; ++i) {
+                            double d = i_digital[i] / t;
+
+                            i_digital[i] -= d * sampling_interval;
+                            if (d >= 0.5) {
+                                samples[dst].digital |= (1 << i);
+                            }
+                        }
+                        //printf("generated %u -> %lg\n", samples[dst].analog[0], i_analog[0]);
+                        ++dst;
+                        t -= sampling_interval;
+                    }
+
+                    // integrate a source sample
+                    for (int i = 0; i < 2; ++i) {
+                        i_analog[i] += raw_sampling_interval * raw_samples[src].analog[i];
+                    }
+                    for (int i = 0; i < 8; ++i) {
+                        if ((raw_samples[src].digital & (1 << i)) != 0) {
+                            i_digital[i] += raw_sampling_interval * 1;
+                        }
+                    }
+                    //printf("added %u -> %lg\n", raw_samples[src].analog[0], i_analog[0]);
+                    ++src;
+                    t += raw_sampling_interval;
+                }
+                add_samples(dst, samples);
+                //add_samples(num_raw_samples, raw_samples);
             }
             break;
         }
@@ -218,30 +294,35 @@ main_loop(void *userdata) {
     return nullptr;
 }
 
-sampling_preset_t sampling_presets[] = {
-    { true, 0, 0,  20e-8 },
-    { true, 0, 1,  50e-8 },
-    { true, 0, 3, 100e-8 }
-};
+
+const int adc_conv_cycles[8] = { 14, 20, 26, 41, 54, 68, 84, 252 };
 
 void
 set_sampling_preset(uint8_t n) {
     printf("sampling_preset=%d\n", n);
-    current_sampling_preset = n;
+    current_sampling_preset_idx = n;
+    current_sampling_preset = &sampling_presets[current_sampling_preset_idx];
 
-    sampling_preset_t *s = &(sampling_presets[current_sampling_preset]);
+    // calculate the raw sampling interval
 
-    // minimal conversion interval in nsec
-    static double base = 1000.0 * 7 / 72;
-    // 72 is the CPU freq in MHz, conversion interval is 7 clks
-    // so 7 / 72 is the conversion interval in usec (would be, without the prescaler),
-    // so 1000 times that is in nsec
+    // raw sampling interval = cycles_per_conversion / (fCPU / prescaler) 
 
-    // prescaler values for 0..3 are 2, 4, 6, 8, that is, 2*(n+1)
-    raw_sampling_interval = 2 * (s->sample_rate + 1) * base * 1e-9;
+    // cycles_per_conversion depends on the sampling_time_idx param of the current preset, see adc_conv_cycles[]
+    // fCPU = 72 MHz = 72e6 Hz
+    // prescaler codes 0,1,2,3 mean divisor values 2,4,6,8, that is, 2*(n+1)
+
+    // raw sampling interval = conv_cycles[sidx] * 2 * (psc+1) / fCPU = conv_cycles[sidx] * (psc+1) / 36e6
+
+    raw_sampling_interval = adc_conv_cycles[current_sampling_preset->sampling_time_idx] * (current_sampling_preset->sample_rate + 1) / 36e6;
+    
+    if (current_sampling_preset->is_interleaved) {
+        raw_sampling_interval /= 2;
+    }
 
     // will be resampled to these rates
-    sampling_interval = s->sampling_interval;
+    sampling_interval = current_sampling_preset->sampling_interval;
+
+    printf("raw_sampling_interval=%lf, sampling_interval=%lf\n", raw_sampling_interval * 1e6, sampling_interval * 1e6);
 
     pthread_kill(thr_sampling, SIGUSR1);
 }
@@ -360,3 +441,67 @@ shutdown_device() {
     libusb_close(dh);
     libusb_exit(ctx);
 }
+
+#if 0
+    // resampling code, but it handles only up-sampling (raw_sampling_interval <= sampling_interval)
+
+                while ((src < num_raw_samples) && (dst < num_samples)) {
+
+                    // integrate all source samples that fall entirely within the current dest sample
+                    while ((t + raw_sampling_interval) <= sampling_interval) {
+                        for (int i = 0; i < 2; ++i) {
+                            i_analog[i] += raw_samples[src].analog[i] * raw_sampling_interval;
+                        }
+                        for (int i = 0; i < 8; ++i) {
+                            if ((raw_samples[src].digital & (1 << i)) != 0) {
+                                i_digital[i] += 1 * raw_sampling_interval;
+                            }
+                        }
+                        ++src;
+                        t += raw_sampling_interval;
+                    }
+
+                    double t_this;
+
+                    // the next source sample falls only partially within the current dest sample
+                    // integrate the covered part of it
+                    t_this = sampling_interval - t;
+                    for (int i = 0; i < 2; ++i) {
+                        i_analog[i] += raw_samples[src].analog[i] * t_this;
+                    }
+                    for (int i = 0; i < 8; ++i) {
+                        if ((raw_samples[src].digital & (1 << i)) != 0) {
+                            i_digital[i] += 1 * t_this;
+                        }
+                    }
+
+                    // form the new sample to represent the integrated values
+                    for (int i = 0; i < 2; ++i) {
+                        samples[dst].analog[i] = i_analog[i] / sampling_interval;
+                        i_analog[i] = 0;
+                    }
+                    samples[dst].digital = 0;
+                    for (int i = 0; i < 8; ++i) {
+                        if (i_digital[i] >= (0.5 * sampling_interval)) {
+                            samples[dst].digital |= (1 << i);
+                        }
+                        i_digital[i] = 0;
+                    }
+                    ++dst;
+
+                    // integrate the remainder of that partially covered source sample
+                    double t_that = raw_sampling_interval - t_this;
+                    for (int i = 0; i < 2; ++i) {
+                        i_analog[i] += raw_samples[src].analog[i] * t_that;
+                    }
+                    for (int i = 0; i < 8; ++i) {
+                        if ((raw_samples[src].digital & (1 << i)) != 0) {
+                            i_digital[i] += 1 * t_that;
+                        }
+                    }
+
+                    // seek the source until the end of that partially covered sample
+                    t = t_that;
+                    ++src;
+                }
+#endif

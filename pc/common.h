@@ -90,8 +90,15 @@ struct sampling_preset_t {
     double sampling_interval;
 };
 
-extern uint8_t trig_dir, trig_source, trig_level, current_sampling_preset;
-extern sampling_preset_t sampling_presets[];
+struct sample_t {
+    uint16_t analog[2];
+    uint8_t digital;
+};
+
+extern uint8_t trig_dir, trig_source, trig_level, current_sampling_preset_idx;
+extern const sampling_preset_t sampling_presets[];
+extern const sampling_preset_t *current_sampling_preset;
+extern const int NUM_SAMPLING_PRESETS;
 extern double raw_sampling_interval, sampling_interval;
 
 #endif // COMMON_H

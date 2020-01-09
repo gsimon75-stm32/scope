@@ -1,6 +1,7 @@
 include(stm32f10x.m4)
 include(usb.m4)
 
+// One sample: 2 hwords for each analog channel + 1 byte for digital channels = 5 bytes
 define({MAX_SAMPLES}, 2048)
 
 define({rADC}, r11)
@@ -37,7 +38,7 @@ FUNCTION(adc_setup)
     push {{lr}}
 
     // set ADC prescaler
-    mov r2, 3
+    mov r2, 0x03
     bl adc_configure
 
     ldr r0, LOC({RCC_BASE})
@@ -111,7 +112,7 @@ FUNCTION(adc_setup)
     lsl r1, 16
     orr r2, r1
 
-    ldr r1, LOC({CALIBRATION})  // just for debugging, we won't need it, as the data is already compensated
+    ldr r1, LOC(CALIBRATION)  // just for debugging, we won't need it, as the data is already compensated
     str r2, [r1]
 
     mov r1, 0
@@ -141,7 +142,7 @@ FUNCTION(adc_setup)
   LOC({RCC_BASE}):      .word RCC_BASE
   LOC({GPIOB_BASE}):    .word GPIOB_BASE
   LOC({ADC2_BASE}):     .word ADC2_BASE
-  LOC({CALIBRATION}):   .word calibration
+  LOC(CALIBRATION):     .word calibration
 ENDFUNC // adc_setup
 
 
@@ -155,7 +156,7 @@ FUNCTION(adc_configure)
     // set ADC prescaler
     ldr r0, LOC({RCC_BASE})
     ldr r1, [r0, RCC_CFGR]
-    mov r3, MASK(RCC_CFGR_ADCPRE)       // FIXME: simplify
+    mov r3, MASK(RCC_CFGR_ADCPRE)
     bic r1, r3
     and r3, r2, 0x03
     orr r1, r1, r3, LSL RCC_CFGR_ADCPRE_Shift
@@ -291,7 +292,7 @@ FUNCTION(main)
     mov r0, MAX_SAMPLES
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR] // will be overwritten when the num of samples is known
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR] // will be overwritten when the num of samples is known
-    ldr r0, LOC({SAMPLES})
+    ldr r0, LOC(SAMPLES)
     str r0, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
     str r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR] // will be overwritten when the num of samples is known
     add r0, rADC, ADC_DR
@@ -348,7 +349,7 @@ FUNCTION(main)
     tst r0, ADC_SR_EOC
     beq LOC(FOREVER)    // sample not yet ready
     ldrh r0, [rADC, ADC_DR]
-    ldr r12, LOC({TRIG_LEVEL})
+    ldr r12, LOC(TRIG_LEVEL)
     ldrh r12, [r12]
     cmp r0, r12
     ite lo
@@ -405,8 +406,8 @@ FUNCTION(main)
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({DMA1_BASE}):         .word DMA1_BASE
   
-  LOC({TRIG_LEVEL}):        .word trig_level
-  LOC({SAMPLES}):           .word samples
+  LOC(TRIG_LEVEL):          .word trig_level
+  LOC(SAMPLES):             .word samples
   LOC(GPIOA_IDR):           .word heval(GPIOA_BASE + GPIO_IDR)
   LOC(USB_EP_BUFFERS):      .word usb_ep_buffers
 
@@ -439,18 +440,19 @@ FUNCTION(DMA1_Channel_1_5_Common)
     ldr r0, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
     tst r0, DMA_CCR_EN
     bne LOC(NOT_YET)
+
     // send samples
+    ldr r5, LOC(SAMPLES)  // data ptr
+    ldr r6, LOC(DATA_LEN)
+    ldrh r6, [r6] // data count
     mov r2, 1   // EA
-    ldr r5, LOC({SAMPLES})  // data ptr
-    ldr r6, LOC({NUM_SAMPLES})
-    ldrh r6, [r6]
-    lsl r6, 2 // data count
     bl usb_send
     mov rSTATE, STATE_SENDING
   LOC(NOT_YET):
     pop {{r5, r6, pc}}
   LOC(NUM_SAMPLES):         .word num_samples
-  LOC({SAMPLES}):           .word samples
+  LOC(DATA_LEN):            .word data_len
+  LOC(SAMPLES):             .word samples
 ENDFUNC // DMA1_Channel_1_5_Common
 
 
@@ -482,7 +484,7 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     //      r1 = USB_EPnR
     //      r2 = EA (not used)
     //      r4 = data len
-    push {{r0-r5, lr}}
+    push {{r0-r6, lr}}
 
     cmp r4, 8
     blo LOC(DONE)
@@ -513,33 +515,14 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     eor r1, USB_EPR_EP_TX_NAK   // STAT_TX = NAK
     eor r1, USB_EPR_EP_RX_VALID // STAT_RX = VALID
     str r1, [r0, USB_EP1R]
-    pop {{r0-r5, pc}}
+    pop {{r0-r6, pc}}
  
  LOC(PREPARE_SWEEP):
-    // process wLength: num of samples
-    ldrh r2, [r3, USB_PKT_SETUP_LENGTH]
-    // clamp down to MAX_SAMPLES
-    mov r4, MAX_SAMPLES
-    cmp r2, r4
-    it hs
-    movhs r2, r4
-    ldr r4, LOC({NUM_SAMPLES})
-    strh r2, [r4]
-    str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]
-    lsr r5, r2, 1       // n = num_samples / 2, because of the dual adc mode we'll acquire *pairs* of hwords -> words 
-    str r5, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]
-
-    // digital dest area = analog dest area + num_samples (hwords)
-    ldr r4, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
-    lsl r5, r2, 1       // n = num_samples * 2
-    add r4, r5
-    str r4, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
-    
     // process wIndex: trig level
     ldrh r2, [r3, USB_PKT_SETUP_INDEX]
     // clamp down to 0x0fff
     bic r2, 0xf000
-    ldr r4, LOC({TRIG_LEVEL})
+    ldr r4, LOC(TRIG_LEVEL)
     strh r2, [r4]
     
     // process valueH: bit4,3: trig source (00=none,01=analog,10=digital), bit2,1,0=trig states to skip (0=low,1=high)
@@ -552,34 +535,80 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     // - bits 4..2: sampling time (ADC_SMPRn.SMPm)
     // - bits 1,0: prescaler value (RCC_CFGR.ADCPRE)
     bl adc_configure
+
+    // r4 = sampling_time_index = (r2 >> 2) & 7
     lsr r4, r2, 2
-    and r4, 7       // sampling time index
-    and r2, 3       // prescaler value
+    and r4, 7
 
-    adr r5, LOC(ADC_CONV_TIMES)
-    ldrb r5, [r5, r4]   // total conversion time in cycles
+    // r5 = total_conv_cycles = adc_conv_cycles[sampling_time_index]
+    adr r5, LOC(ADC_CONV_CYCLES)
+    ldrb r5, [r5, r4]
 
-    // timer counter = total_conv_time * (prescaler + 1) - 1
-    add r2, 1
-    mul r5, r2
+    // r4 = prescaler_value = r2 & 3
+    and r4, 3
+
+    // r5 = timer_limit = total_conv_cycles * (prescaler + 1)
+    add r4, 1
+    mul r5, r4
+
+    // if (is_interleaved) r5 /= 2
+    tst r2, 0x80
+    it ne
+    lsrne r5, 1
+    // r5 = timer_limit -= 1
     sub r5, 1
     
-    // start digital sweep: setup timer but don't enable it yet
+    // digital sweep: setup timer but don't enable it yet
     ldr r4, LOC({TIM1_BASE})
-    mov r2, 0
-    str r2, [r4, TIM_CR1]   // disable the timer
-    str r2, [r4, TIM_CNT]   // reset to zero
+    mov r6, 0
+    str r6, [r4, TIM_CR1]   // disable the timer
+    str r6, [r4, TIM_CNT]   // reset to zero
     str r5, [r4, TIM_ARR]   // set limit
-    // enable DMA
-    mov r2, heval((3 << DMA_CCR_PL_Shift) + (1 << DMA_CCR_MSIZE_Shift) + (1 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
-    str r2, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+
+    // process wLength: num of samples
+    ldrh r6, [r3, USB_PKT_SETUP_LENGTH]
+    // clamp down to MAX_SAMPLES
+    mov r4, MAX_SAMPLES
+    cmp r6, r4
+    it hs
+    movhs r6, r4
+    ldr r4, LOC(NUM_SAMPLES)
+    strh r6, [r4]       // n_digital = num_samples
+    str r6, [rDMA, DMA_CHANNEL5 + DMA_Channel_CNDTR]    // digital samples
+
+    // r5 = n_analog = is_inteleaved ? num_samples / 2 : num_samples
+    tst r2, 0x80
+    ite ne
+    lsrne r5, r6, 1
+    moveq r5, r6
+    str r5, [rDMA, DMA_CHANNEL1 + DMA_Channel_CNDTR]    // analog samples
+
+    // r5 = size_analog = 4 * n_analog
+    lsl r5, 2
+
+    // digital dest area = analog dest area + size_analog
+    // NOTE: interleave-sampled data will be fluffed up to look like regular
+    ldr r4, [rDMA, DMA_CHANNEL1 + DMA_Channel_CMAR]
+    add r4, r5
+    str r4, [rDMA, DMA_CHANNEL5 + DMA_Channel_CMAR]
+
+    // r5 = data_len = size_analog + size_digital
+    add r5, r6
+    ldr r4, LOC(DATA_LEN)
+    strh r5, [r4]
     
-    // start analog sweep: continue sampling but without dma
-    mov r2, heval(ADC_CR2_CONT + ADC_CR2_ADON)
-    str r2, [rADC, ADC_CR2]
-    // enable DMA
-    mov r2, heval((3 << DMA_CCR_PL_Shift) + (2 << DMA_CCR_MSIZE_Shift) + (2 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
-    str r2, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
+    // enable DMA for digital sampling: psize=16bits, msize=8bits
+    mov r6, heval((3 << DMA_CCR_PL_Shift) + (0 << DMA_CCR_MSIZE_Shift) + (1 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
+    str r6, [rDMA, DMA_CHANNEL5 + DMA_Channel_CCR]
+    
+    // analog sweep: continue sampling but without dma
+    mov r6, heval(ADC_CR2_CONT + ADC_CR2_ADON)
+    str r6, [rADC, ADC_CR2]
+
+    // enable DMA for analog sampling: psize=32bits, msize=32bits
+    mov r6, heval((3 << DMA_CCR_PL_Shift) + (2 << DMA_CCR_MSIZE_Shift) + (2 << DMA_CCR_PSIZE_Shift) + DMA_CCR_MINC + DMA_CCR_TCIE + DMA_CCR_EN)
+    str r6, [rDMA, DMA_CHANNEL1 + DMA_Channel_CCR]
+
     b LOC(DONE)
 
    
@@ -621,13 +650,14 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
   LOC(RXBUF):               .word USB_EP1_RX_BUF
   LOC(TRIG_LEVEL):          .word trig_level
   LOC(NUM_SAMPLES):         .word num_samples
+  LOC(DATA_LEN):            .word data_len
   LOC({TIM1_BASE}):         .word TIM1_BASE
   LOC({TIM2_BASE}):         .word TIM2_BASE
   
   // Total conversion time = sampling + 12.5 cycles
   // Sampling times (selected by ADC_SMPRn.SMPm): 1.5, 7.5, 13.5, 28.5, 41.5, 55.5, 71.5, 239.5 cycles
   // So the total conversion times:
-  LOC(ADC_CONV_TIMES):      .byte 14, 20, 26, 41, 54, 68, 84, 252
+  LOC(ADC_CONV_CYCLES):     .byte 14, 20, 26, 41, 54, 68, 84, 252
   .align(4)
 ENDFUNC // usb_ep1_rx_notify
 
@@ -639,11 +669,14 @@ ENDFUNC // usb_ep1_rx_notify
     .section .data
     .align 4
 
-calibration .word 0     // low hword is for ADC0, high hword is for ADC1 (just like ADC_DR)
-trig_level  .hword 0
-num_samples .hword 0
+calibration     .word 0     // low hword is for ADC0, high hword is for ADC1 (just like ADC_DR)
+trig_level      .hword 0
+num_samples     .hword 0
+data_len        .hword 0
+
     .align 4
-samples     .skip MAX_SAMPLES * 2 * 2
+samples         .skip MAX_SAMPLES * 5
+    // FIXME: put a canary here and check it after conversions
 
 
 // --------------------------------------------------------------------------

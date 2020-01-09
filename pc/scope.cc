@@ -17,7 +17,7 @@
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
-uint8_t current_sampling_preset = 0;
+uint8_t current_sampling_preset_idx = 0;
 uint8_t trig_dir = trig_direction_t::RISING;
 uint8_t trig_source = trig_source_t::ANALOG;
 uint8_t trig_level = 0x80;
@@ -72,7 +72,7 @@ main(int argc, char **argv) {
     while ((i = getopt_long(argc, argv, "hr:d:s:l:", longopts, NULL)) != -1) {
         switch (i) {
             case 'h': help(argv[0]); return 0;
-            case 'r': current_sampling_preset = strtol(optarg, NULL, 0); break;
+            case 'r': current_sampling_preset_idx = strtol(optarg, NULL, 0); break;
             case 'd': trig_dir = strtol(optarg, NULL, 0); break;
             case 's': trig_source = strtol(optarg, NULL, 0); break;
             case 'l': trig_level = strtol(optarg, NULL, 0); break;
@@ -130,13 +130,13 @@ main(int argc, char **argv) {
 
                 case SDLK_LEFT:
                 do_pause = false;
-                set_sampling_preset((current_sampling_preset + 3 - 1) % 3);
+                set_sampling_preset((current_sampling_preset_idx + NUM_SAMPLING_PRESETS - 1) % NUM_SAMPLING_PRESETS);
                 redraw_time_scale();
                 break;
 
                 case SDLK_RIGHT:
                 do_pause = false;
-                set_sampling_preset((current_sampling_preset + 1) % 3);
+                set_sampling_preset((current_sampling_preset_idx + 1) % NUM_SAMPLING_PRESETS);
                 redraw_time_scale();
                 break;
 
@@ -243,6 +243,20 @@ main(int argc, char **argv) {
                 case SDLK_4:
                 do_pause = false;
                 pwm_total = 576; // 125 kHz
+                pwm_duty = pwm_total / 2;
+                commit_pwm();
+                break;
+
+                case SDLK_5:
+                do_pause = false;
+                pwm_total = 14400; // 5 kHz
+                pwm_duty = pwm_total / 2;
+                commit_pwm();
+                break;
+
+                case SDLK_6:
+                do_pause = false;
+                pwm_total = 36000; // 2 kHz
                 pwm_duty = pwm_total / 2;
                 commit_pwm();
                 break;

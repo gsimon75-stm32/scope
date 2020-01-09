@@ -10,11 +10,13 @@
 #include <sys/time.h>
 #include <SDL.h>
 
+#define NUM_BEAMS   2
+
 int x = 0;
 uint32_t analog_screen[ANALOG_SCREEN_HEIGHT*ANALOG_SCREEN_WIDTH];
 SDL_Texture *txt_analog_screen;
 SDL_Rect dst_analog_screen { ANALOG_SCREEN_X, ANALOG_SCREEN_Y, ANALOG_SCREEN_WIDTH, ANALOG_SCREEN_HEIGHT };
-uint32_t* lastOfs[ANALOG_SCREEN_WIDTH];
+uint32_t* lastOfs[NUM_BEAMS][ANALOG_SCREEN_WIDTH];
 
 uint32_t density[DENSITY_HEIGHT], count_density[DENSITY_HEIGHT];
 SDL_Texture *txt_density;
@@ -44,52 +46,64 @@ end_of_sweep() {
 }
 
 void
-add_analog_samples(uint16_t num_samples, uint16_t *samples) {
-    if (num_samples > ANALOG_SCREEN_WIDTH)
-        num_samples = ANALOG_SCREEN_WIDTH;
+draw_beam(int beam, int x, uint32_t sample) {
+    uint16_t y = (sample * 330) >> 12;
+    if (y >= ANALOG_SCREEN_HEIGHT)
+        y = ANALOG_SCREEN_HEIGHT - 1;
 
-    for (int x = 0; (x < ANALOG_SCREEN_WIDTH) && (x < num_samples); ++x) {
-        uint16_t y = (((uint32_t)samples[x]) * 330) >> 12;
-        if (y >= ANALOG_SCREEN_HEIGHT)
-            y = ANALOG_SCREEN_HEIGHT - 1;
-        //y = (voltage_factor * y) >> 8;
-
-        ++count_density[y];
-        if (count_density[y] == 0xff) {
-            for (int i = 0; i < DENSITY_HEIGHT; ++i)
-                density[DENSITY_HEIGHT - i] = count_density[i] * 0x010101;
-            memset(count_density, 0, sizeof(count_density));
-        }
-
-        reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0;
-        reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0;
-        lastOfs[x] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(ANALOG_SCREEN_HEIGHT - 1 - y)) + x];
-
-        if (x & 1) {
-            reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0xff;
-            reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0x7f;
-        }
-        else {
-            reinterpret_cast<uint8_t*>(lastOfs[x])[0] = 0x7f;
-            reinterpret_cast<uint8_t*>(lastOfs[x])[1] = 0xff;
-        }
+    ++count_density[y];
+    if (count_density[y] == 0xff) {
+        for (int i = 0; i < DENSITY_HEIGHT; ++i)
+            density[DENSITY_HEIGHT - i] = count_density[i] * 0x010101;
+        memset(count_density, 0, sizeof(count_density));
     }
-    request_redraw();
+
+    reinterpret_cast<uint8_t*>(lastOfs[beam][x])[0] = 0;
+    reinterpret_cast<uint8_t*>(lastOfs[beam][x])[1] = 0;
+    lastOfs[beam][x] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(ANALOG_SCREEN_HEIGHT - 1 - y)) + x];
+    switch (beam) {
+        case 0:
+        reinterpret_cast<uint8_t*>(lastOfs[beam][x])[0] = 0x7f;
+        reinterpret_cast<uint8_t*>(lastOfs[beam][x])[1] = 0xff;
+        break;
+
+        case 1:
+        reinterpret_cast<uint8_t*>(lastOfs[beam][x])[0] = 0xff;
+        reinterpret_cast<uint8_t*>(lastOfs[beam][x])[1] = 0x7f;
+        break;
+    }
 }
 
 void
-add_digital_samples(uint16_t num_samples, uint16_t *samples) {
-    if (num_samples > DIGITAL_SCREEN_WIDTH)
-        num_samples = DIGITAL_SCREEN_WIDTH;
+add_samples(uint16_t num_samples, sample_t *samples) {
+    int max_x;
 
-    for (int x = 0; (x < DIGITAL_SCREEN_WIDTH) && (x < num_samples); ++x) {
-        int y = 0;
-        for (int mask = 0x80; mask; mask >>= 1) {
+    // update analog display
+    max_x = num_samples;
+    if (max_x > ANALOG_SCREEN_WIDTH)
+        max_x = ANALOG_SCREEN_WIDTH;
+
+    for (int x = 0; x < max_x; ++x) {
+        for (int beam = 0; beam < NUM_BEAMS; ++beam) {
+            draw_beam(beam, x, samples[x].analog[beam]);
+        }
+    }
+
+    // update digital display
+    max_x = num_samples;
+    if (max_x > DIGITAL_SCREEN_WIDTH)
+        max_x = DIGITAL_SCREEN_WIDTH;
+
+    int y = 0;
+    for (int mask = 0x80; mask; mask >>= 1) {
+
+        bool was_high = (samples[0].digital & mask) != 0;
+        for (int x = 0; x < max_x; ++x) {
             for (int i = 0; i < 5; ++i)
                 digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] &= 0x0000ff;
 
-            bool is_high = (samples[x] & mask) != 0;
-            bool was_high = (x > 0) ? (samples[x - 1] & mask) != 0 : is_high;
+            bool is_high = (samples[x].digital & mask) != 0;
+
             if (is_high && was_high) {
                 digital_screen[DIGITAL_SCREEN_WIDTH*(y + 0) + x] |= 0xff0000;
             }
@@ -100,9 +114,12 @@ add_digital_samples(uint16_t num_samples, uint16_t *samples) {
                 for (int i = 0; i < 5; ++i)
                     digital_screen[DIGITAL_SCREEN_WIDTH*(y + i) + x] |= 0xffff00;
             }
-            y += 8;
+            was_high = is_high;
         }
+
+        y += 8;
     }
+
     request_redraw();
 }
 
@@ -142,8 +159,10 @@ draw_grid(void) {
 
 void
 init_screen() {
-    for (int i = 0; i < ANALOG_SCREEN_WIDTH; ++i)
-        lastOfs[i] = &analog_screen[0];
+    for (int i = 0; i < ANALOG_SCREEN_WIDTH; ++i) {
+        lastOfs[0][i] = &analog_screen[0];
+        lastOfs[1][i] = &analog_screen[0];
+    }
 
     memset(density, 0, sizeof(density));
 

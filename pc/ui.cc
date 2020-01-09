@@ -101,10 +101,12 @@ init_ui() {
 void
 redraw_time_scale(void) {
     char buf[32];
+
+    double interval_1px = sampling_interval;
     
     memset(time_scale, 0, sizeof(time_scale));
     for (int i = 0; i < TIME_SCALE_WIDTH; i += 100) {
-        format_with_suffix(buf, sizeof(buf), sampling_interval * i);
+        format_with_suffix(buf, sizeof(buf), interval_1px * i);
         int x = i ? (i - 1*8) : 0;
         putstr(time_scale, TIME_SCALE_WIDTH, x, 10, buf, 0x0000ff);
     }

@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
+#include "common.h"
+
 void init_screen();
-void add_analog_samples(uint16_t num_samples, uint16_t *samples);
-void add_digital_samples(uint16_t num_samples, uint16_t *samples);
+void add_samples(uint16_t num_samples, sample_t *samples);
 void end_of_sweep();
 void redraw_screen();
 void shutdown_screen();
