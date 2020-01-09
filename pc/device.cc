@@ -200,34 +200,41 @@ main_loop(void *userdata) {
                     continue;
 
                 // pad with zero-samples to represent the sampling overhead time (from trig to 0th sample)
-                n = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval);
-                for (int i = 0; i < n; ++i) {
+                int n_pad = (int)(SAMPLING_OVERHEAD_TIME / raw_sampling_interval);
+                for (int i = 0; i < n_pad; ++i) {
                     raw_samples[i].analog[0] = raw_samples[i].analog[1] = 0;
                     raw_samples[i].digital = 0;
                 }
-                num_raw_samples += n;
+                num_raw_samples += n_pad;
 
                 // split raw samples' data to (structured) samples
                 uint8_t *p = raw_samples_data;
                 if (current_sampling_preset->is_interleaved) {
                     // NOTE: This mode is used for sampling the *same* signal with two channels, interleaving the sampling times,
                     // so what we have here is a 'mono' signal represented as a 'stereo' with half the length.
-                    for (int i = n; i < num_raw_samples; i += 2, p += 4) {
+                    for (int i = n_pad; i < num_raw_samples; i += 2, p += 4) {
                         raw_samples[i].analog[0] = raw_samples[i].analog[1] = le16dec(p);
                         raw_samples[i + 1].analog[0] = raw_samples[i + 1].analog[1] = le16dec(p + 2);
                     }
-                    for (int i = n; i < num_raw_samples; ++i, ++p) {
+                    for (int i = n_pad; i < num_raw_samples; ++i, ++p) {
                         raw_samples[i].digital = *p;
                     }
                 }
                 else {
-                    for (int i = n; i < num_raw_samples; ++i, p += 4) {
+                    for (int i = n_pad; i < num_raw_samples; ++i, p += 4) {
                         raw_samples[i].analog[0] = le16dec(p);
                         raw_samples[i].analog[1] = le16dec(p + 2);
                     }
-                    for (int i = n; i < num_raw_samples; ++i, ++p) {
+                    for (int i = n_pad; i < num_raw_samples; ++i, ++p) {
                         raw_samples[i].digital = *p;
                     }
+                }
+
+                // fix the overhead padding by duplicating the 1st real sample
+                for (int i = 0; i < n_pad; ++i) {
+                    raw_samples[i].analog[0] = raw_samples[n_pad].analog[0];
+                    raw_samples[i].analog[1] = raw_samples[n_pad].analog[1];
+                    raw_samples[i].digital = raw_samples[n_pad].digital;
                 }
 
                 // Resample the data to get a desired sampling rate
@@ -285,7 +292,7 @@ main_loop(void *userdata) {
                     t += raw_sampling_interval;
                 }
                 add_samples(dst, samples);
-                //add_samples(num_raw_samples, raw_samples);
+                //add_samples(num_raw_samples, raw_samples); // DEBUG: display raw samples
             }
             break;
         }
@@ -322,7 +329,7 @@ set_sampling_preset(uint8_t n) {
     // will be resampled to these rates
     sampling_interval = current_sampling_preset->sampling_interval;
 
-    printf("raw_sampling_interval=%lf, sampling_interval=%lf\n", raw_sampling_interval * 1e6, sampling_interval * 1e6);
+    //printf("raw_sampling_interval=%lf, sampling_interval=%lf\n", raw_sampling_interval * 1e6, sampling_interval * 1e6);
 
     pthread_kill(thr_sampling, SIGUSR1);
 }

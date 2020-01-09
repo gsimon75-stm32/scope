@@ -545,16 +545,19 @@ FUNCTION(usb_ep1_rx_notify)    // host -> dev
     ldrb r5, [r5, r4]
 
     // r4 = prescaler_value = r2 & 3
-    and r4, 3
+    and r4, r2, 3
 
-    // r5 = timer_limit = total_conv_cycles * (prescaler + 1)
+    // clks = total_conv_cycles * 2 * (prescaler + 1), but this should be halved in interleaved mode,
+    // so we calculate its half, and then double it when not in interleaved mode
+
+    // r5 = timer_limit = clks / 2 = total_conv_cycles * (prescaler + 1)
     add r4, 1
     mul r5, r4
 
-    // if (is_interleaved) r5 /= 2
+    // if (!is_interleaved) r5 *= 2
     tst r2, 0x80
-    it ne
-    lsrne r5, 1
+    it eq
+    lsleq r5, 1
     // r5 = timer_limit -= 1
     sub r5, 1
     
