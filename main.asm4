@@ -31,7 +31,7 @@ define({STATE_SENDING},             heval(4 << 3))
 // 'no trigger' mode.
 
 // --------------------------------------------------------------------------
-    .section .text
+    SECTION({.text})
     .align(4)
 
 FUNCTION(adc_setup)
@@ -666,10 +666,10 @@ ENDFUNC // usb_ep1_rx_notify
 
 
 // --------------------------------------------------------------------------
-    .section .rodata
+    SECTION({.rodata})
 
 // --------------------------------------------------------------------------
-    .section .data
+    SECTION({.data})
     .align 4
 
 calibration     .word 0     // low hword is for ADC0, high hword is for ADC1 (just like ADC_DR)
@@ -683,9 +683,9 @@ samples         .skip MAX_SAMPLES * 5
 
 
 // --------------------------------------------------------------------------
-    .section .bss
+    SECTION({.bss})
 
 // --------------------------------------------------------------------------
-    .section .periph
+    SECTION({.periph})
 
 // vim: set ts=4 sw=4 et:

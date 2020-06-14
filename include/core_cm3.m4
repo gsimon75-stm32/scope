@@ -8,8 +8,6 @@ dnl Copyright (C) 2009-2012 ARM Limited. All rights reserved.
     .thumb
     .syntax unified
 
-include(boilerplate.m4)
-
 dnl Define both Exception_Yadda=$2 and IRQ_Yadda=($2 - 0x10)
 define({def_exc_irq}, {define(Exception_$1, $2)define(IRQ_$1, eval(($2)-0x10))})
 

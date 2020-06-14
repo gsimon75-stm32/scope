@@ -24,7 +24,7 @@ define({ST7789_CASET_BASE},     0)
 define({ST7789_RASET_BASE},     2)
 
 // --------------------------------------------------------------------------
-    .section .text
+    SECTION({.text})
     .align(4)
 
 FUNCTION(st7789_setup)
@@ -519,7 +519,7 @@ FUNCTION(puts)
 ENDFUNC // puts
 
 // --------------------------------------------------------------------------
-    .section .rodata
+    SECTION({.rodata})
     .align(4)
 
 st7789_charset:
@@ -630,7 +630,7 @@ st7789_charset:
     .hword 0b111110101000100    // 0x7f = Del
 
 // --------------------------------------------------------------------------
-    .section .data
+    SECTION({.data})
     .align(4)
 
 st7789_state:   .skip ST7789_STATE_SIZEOF

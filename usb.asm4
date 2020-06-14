@@ -1,7 +1,7 @@
 include(stm32f10x.m4)
 include(usb.m4)
 
-    .section .text
+    SECTION({.text})
     .align(4)
 
 // Enable and reset the USB hardware
@@ -603,7 +603,7 @@ ENDFUNC // usb_ep0_rx_notify
 
 
 // --------------------------------------------------------------------------
-    .section .rodata
+    SECTION({.rodata})
 
 usb_descriptor_device:      // 0x12 bytes
     .byte usb_descriptor_device_end - usb_descriptor_device // bLength
@@ -658,9 +658,9 @@ usb_descriptor_config:
     .byte USB_DESC_TYPE_CFG                                 // bDescriptorType
     .hword usb_config_total_end - usb_descriptor_config     // wTotalLength
     .byte 1                                                 // bNumInterfaces
-    .byte 0                                                 // bConfigurationValue
+    .byte 1                                                 // bConfigurationValue
     .byte 0                                                 // iConfiguration
-    .byte 0x80                                              // bmAttributes
+    .byte 0x80                                              // bmAttributes, 0xa0=+supports remote wakeup
     .byte 50                                                // bMaxPower
 usb_descriptor_config_end:
 
@@ -717,7 +717,7 @@ usb_ep_configs_end:
 
 
 // --------------------------------------------------------------------------
-    .section .usb_pma
+    SECTION({.usb_pma})
 
 /* NOTE: PMA is 0x100 halfwords (16-bit each), which the USB sees as contiguous memory, but the uC sees it as fluffed up to
     words (32-bit each), with the high half as 0. This section is from the viewpoint of the uC, so we store here words instead
@@ -738,7 +738,7 @@ USB_EP1_TX_BUF:     .skip USB_EP1_TX_BUFSIZE*2
 
 
 // --------------------------------------------------------------------------
-    .section .bss
+    SECTION({.bss})
 
 device_address  .word 0
 device_status   .word 0 // bit1 = remote wakeup, bit0=self-powered

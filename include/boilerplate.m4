@@ -47,4 +47,7 @@ define({MASK}, {heval(((1 << $1{}_Bits) - 1) << $1{}_Shift)})
 
 // --------------------------------------------------------------------------
 
+define({SECTION}, {define({__section__}, $1).section $1})
+define({DBGLOC}, {ifelse(__section__, {.text}, {    }.loc 1 $1)})
+
 dnl vim: set sw=4 ts=4 ft=asm noet:

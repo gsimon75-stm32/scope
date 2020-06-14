@@ -3,7 +3,7 @@ include(stm32f10x.m4)
 define({LOG_SIZE},  16384)
 
 // --------------------------------------------------------------------------
-    .section .text
+    SECTION({.text})
     .align(4)
 
 FUNCTION(_log_init)
@@ -353,7 +353,7 @@ FUNCTION(_log_usb)
 ENDFUNC // _log_usb
 
 // --------------------------------------------------------------------------
-    .section .bss
+    SECTION({.bss})
 
 _LOG_PTR    .word 0
 _LOG        .skip LOG_SIZE

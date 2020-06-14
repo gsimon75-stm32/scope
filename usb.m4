@@ -1,9 +1,9 @@
 // --------------------------------------------------------------------------
 // Case-dependent constants
-define({USB_VENDOR_ID},             0x5AFE)
-define({USB_PRODUCT_ID},            0x7E57)
+define({USB_VENDOR_ID},             0x1209) // http://pid.codes/1209/
+define({USB_PRODUCT_ID},            0x0001)
 
-define({USB_EP0_BUFSIZE},           0x08)
+define({USB_EP0_BUFSIZE},           0x40)
 define({USB_EP1_RX_BUFSIZE},        0x08)
 define({USB_EP1_TX_BUFSIZE},        0x40)
 

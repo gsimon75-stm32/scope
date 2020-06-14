@@ -1,7 +1,7 @@
 include(stm32f10x.m4)
 
 // --------------------------------------------------------------------------
-    .section .isr_vectors
+    SECTION({.isr_vectors})
 
     .global isr_vector_table
 isr_vector_table:
@@ -76,7 +76,7 @@ isr_vector_table:
     ldr pc, [pc, -264]      // code for boot from SRAM
 
 // --------------------------------------------------------------------------
-	.section .text
+	SECTION({.text})
     .align(4)
 
 FUNCTION(Dummy_Handler)
