@@ -2,11 +2,11 @@ TARGETS		= scope
 
 CXX		= g++
 
-PCLIBS		= SDL2_gfx
+PCLIBS		= SDL2_gfx libusb-1.0
 
 CXXFLAGS	= -ggdb3 -std=c++11
 LDFLAGS		= -ggdb3
-LDLIBS		= -lusb -lm -lpthread
+LDLIBS		= -lm -lpthread
 
 CXXFLAGS	+= $(shell pkg-config --cflags $(PCLIBS))
 LDLIBS		+= $(shell pkg-config --libs $(PCLIBS))
@@ -27,3 +27,4 @@ scope:		scope.o ProggyOpti.o screen.o ui.o device.o
 test:		main.o
 		$(CC) -o $@ $(LDFLAGS) $(filter %.o %.a,$^) $(LDLIBS)
 
+# vim: set sw=8 ts=8 noet indk=:

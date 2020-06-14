@@ -7,7 +7,12 @@
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
-#include <sys/endian.h>
+#if defined(__FreeBSD__)
+#   include <sys/endian.h>
+#else
+#   include <endian.h>
+#   define le16dec(x) le16toh(*(uint16_t*)(x))
+#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -92,8 +97,9 @@ const sampling_preset_t sampling_presets[] = {
 const sampling_preset_t *current_sampling_preset = &sampling_presets[0];
 const int NUM_SAMPLING_PRESETS = sizeof(sampling_presets) / sizeof(sampling_presets[0]);
 
-#define VENDOR  0x5AFE
-#define PRODUCT 0x7E57
+// http://pid.codes/1209/
+#define VENDOR  0x1209
+#define PRODUCT 0x0001
 #define MANUFACTURER  "gsimon75"
 #define PRODUCT_NAME  "STM32 Scope"
 
@@ -101,7 +107,7 @@ const int NUM_SAMPLING_PRESETS = sizeof(sampling_presets) / sizeof(sampling_pres
 
 
 sigset_t sigset_comm;
-pthread_t thr_sampling = nullptr;
+pthread_t thr_sampling = 0;
 
 void sigusr1_handler(int n) {
     //fprintf(stderr, "SIGUSR1 caught: %p\n", pthread_self());
@@ -195,7 +201,6 @@ main_loop(void *userdata) {
                 int data_len = num_raw_samples * (current_sampling_preset->is_interleaved ? 3 : 5);
                 n = 0;
                 res = libusb_bulk_transfer(dh, 0x81, raw_samples_data, data_len, &n, 0);
-                //fprintf(stderr, "got %d bytes, res=%d\n", n, res);
                 if (res != LIBUSB_SUCCESS) // FIXME: reception error
                     continue;
 
@@ -329,30 +334,34 @@ set_sampling_preset(uint8_t n) {
     // will be resampled to these rates
     sampling_interval = current_sampling_preset->sampling_interval;
 
-    //printf("raw_sampling_interval=%lf, sampling_interval=%lf\n", raw_sampling_interval * 1e6, sampling_interval * 1e6);
+    printf("raw_sampling_interval=%lf, sampling_interval=%lf\n", raw_sampling_interval * 1e6, sampling_interval * 1e6);
 
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void
 set_trig_level(uint8_t n) {
     printf("trig_level=0x%02x\n", n);
     trig_level = n;
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void
 set_trig_dir(uint8_t n) {
     printf("trig_dir=%d\n", n);
     trig_dir = n;
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void
 set_trig_source(uint8_t n) {
     printf("trig_source=%d\n", n);
     trig_source = n;
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void set_pwm(uint16_t total, uint16_t duty) {
@@ -361,7 +370,8 @@ void set_pwm(uint16_t total, uint16_t duty) {
     send_pwm_total = total;
     send_pwm_duty = duty;
     cmd = scope_command_t::SEND_PWM;
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void send_custom_event(uint8_t n) {
@@ -369,12 +379,14 @@ void send_custom_event(uint8_t n) {
         ;
     custom_event_idx = n;
     cmd = scope_command_t::SEND_CUSTOM_EVENT;
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 void
 resume(void) {
-    pthread_kill(thr_sampling, SIGUSR1);
+    if (thr_sampling)
+        pthread_kill(thr_sampling, SIGUSR1);
 }
 
 bool
@@ -432,6 +444,11 @@ init_device(void) {
     sigaddset(&sigset_comm, SIGHUP);
     pthread_sigmask(SIG_BLOCK, &sigset_comm, nullptr);
 
+    set_sampling_preset(0);
+    set_trig_level(0x80);
+    set_trig_dir(trig_direction_t::RISING);
+    set_trig_source(trig_source_t::ANALOG);
+
     fprintf(stderr, "creating thread\n");
     res = pthread_create(&thr_sampling, nullptr, main_loop, nullptr);
     return res == 0;
@@ -444,6 +461,7 @@ shutdown_device() {
     if (thr_sampling) {
         pthread_kill(thr_sampling, SIGHUP);
         pthread_join(thr_sampling, nullptr);
+        thr_sampling = 0;
     }
     libusb_close(dh);
     libusb_exit(ctx);
