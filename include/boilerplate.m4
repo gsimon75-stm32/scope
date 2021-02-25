@@ -35,13 +35,24 @@ dnl define({HI8}, {((($1) >> 8) & 0xff)})
 define({_BV}, {ifelse({$#}, 1, eval(1 << ($1)), {eval((1 << ($1)) + $0(shift($@)))})})
 
 dnl '0x'-prefixed 8-digit hex outputting unsigned eval
-define({heval}, {0x{}eval((256+(($1) >> 24)) & 0xff, 16, 2){}eval(($1) & 0xffffff, 16, 6)})
+dnl define({heval}, 0x{}eval((256+(($1) >> 24)) & 0xff, 16, 2){}eval(($1) & 0xffffff, 16, 6))
+define({heval}, {define({__expr__},eval($1)) 0x{}eval((256+(__expr__ >> 24)) & 0xff, 16, 2){}eval(__expr__ & 0xffffff, 16, 6)})
+
+dnl decimal unsigned eval
+define({eval32_firstdigit}, {ifelse(eval($1<-1294967296),1,2,eval($1<-294967296),1,3,4)})
+define({eval32_lastdigits}, {eval((1294967296 + ($1 % 1000000000)) % 1000000000, 10, 9)})
+define({eval32},{define({__expr__},eval($1))ifelse(eval(__expr__<0),0,__expr__,eval32_firstdigit(__expr__)eval32_lastdigits(__expr__))})
 
 dnl LOG2, for 'friendly' input only
 define({LOG2}, {ifelse(eval($1),1,0,{eval(1+$0(eval(($1)>>1)))})})
 
+define({defsym}, {
+	define({$1}, {$2})
+	.stabs  "{$1}:c=i eval32($2)",128,0,0,0
+})
+
 dnl defmask(YADDA, 5, 3) -> define({YADDA_Shift}, 5) define({YADDA_Bits}, 3)
-define({defmask}, {define({$1}_Shift, {$2})define({$1}_Bits, {$3})})
+define({defmask}, {defsym({$1}_Shift, {$2})defsym({$1}_Bits, {$3})})
 dnl MASK(YADDA)
 define({MASK}, {heval(((1 << $1{}_Bits) - 1) << $1{}_Shift)})
 

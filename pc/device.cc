@@ -200,7 +200,7 @@ main_loop(void *userdata) {
 
                 int data_len = num_raw_samples * (current_sampling_preset->is_interleaved ? 3 : 5);
                 n = 0;
-                res = libusb_bulk_transfer(dh, 0x81, raw_samples_data, data_len, &n, 0);
+                res = libusb_bulk_transfer(dh, 0x81, raw_samples_data, data_len, &n, 1000);
                 if (res != LIBUSB_SUCCESS) // FIXME: reception error
                     continue;
 

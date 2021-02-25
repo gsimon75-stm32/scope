@@ -20,7 +20,8 @@ MACHINE_FLAGS	= -mthumb -mcpu=cortex-m3 -mimplicit-it=never
 INCLUDES	= -I./include
 
 M4FLAGS		= $(INCLUDES) -DSTM32F10X_BASE=1 -DSTM32F10X_MD=1 -DBUILD=$(BUILD)
-ASFLAGS		+= $(MACHINE_FLAGS) $(INCLUDES) -k -mapcs-reentrant -mccs
+ASFLAGS		+= $(MACHINE_FLAGS) $(INCLUDES) -k -mapcs-reentrant -mccs -gstabs
+LDFLAGS		+= -g
 
 .PHONY:		all clean ocd refman instrset ocd gdb stop
 
@@ -51,6 +52,6 @@ stop:
 		$(AS) -o $@ $(ASFLAGS) $^
 
 test.elf:	rte/stm32f103.$(BUILD).ld rte/boot.o main.o usb.o # st7789.o
-		$(LD) -n -T $(filter %.ld,$^) -o $@ $(filter %.o %.a,$^)
+		$(LD) $(LDFLAGS) -n -T $(filter %.ld,$^) -o $@ $(filter %.o %.a,$^)
 
 # vim: set sw=8 ts=8 noet indk=:

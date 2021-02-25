@@ -26,7 +26,6 @@ It is still just my hobby project, so don't expect it to be polished as an off-t
 * A configurable PWM generator on A15
 
 
-
 ## STM32F103
 
 It's a cheap but extemely powerful little beasty, it's an ARM7 processor with flash and SRAM on the chip, a bunch of
@@ -103,7 +102,31 @@ all this by just reading the books or others' sources.
 
 ## The scope 'firmware'
 
+Prerequisites:
+* `make`: *GNU* make, `make-1:4.2.1-16.fc32.x86_64 : A GNU tool which simplifies the build process for users`
+* `awk`: `gawk-5.0.1-7.fc32.i686` : The GNU version of the AWK text processing utility
+* `m4`: `m4-1.4.18-12.fc32.x86_64` : The GNU macro processor
+* `arm-none-eabi-{as,ld}`: `arm-none-eabi-binutils-cs-1:2.32-3.fc32.x86_64` : GNU Binutils for cross-compilation for arm-none-eabi target
+
+`make` should be a GNU make, because Makefile contains some extensions that aren't supported by the original, legacy `make`.
+Apart from this, as far as I know, other versions should also work fine.
+
 You can build the 'firmware' by `make` in the main folder, the result will be called `test.elf`.
+
+```
+~/src/scope$ make clean
+rm -rf *.o *.a *.elf rte/*.o test.elf
+
+~/src/scope$ make
+awk -f preprocess.awk rte/boot.asm4 | m4 -I./include -DSTM32F10X_BASE=1 -DSTM32F10X_MD=1 -DBUILD=flash | grep '[^[:space:]]' >rte/boot.s
+arm-none-eabi-as -o rte/boot.o -mthumb -mcpu=cortex-m3 -mimplicit-it=never -I./include -k -mapcs-reentrant -mccs -gstabs rte/boot.s
+awk -f preprocess.awk main.asm4 | m4 -I./include -DSTM32F10X_BASE=1 -DSTM32F10X_MD=1 -DBUILD=flash | grep '[^[:space:]]' >main.s
+arm-none-eabi-as -o main.o -mthumb -mcpu=cortex-m3 -mimplicit-it=never -I./include -k -mapcs-reentrant -mccs -gstabs main.s
+awk -f preprocess.awk usb.asm4 | m4 -I./include -DSTM32F10X_BASE=1 -DSTM32F10X_MD=1 -DBUILD=flash | grep '[^[:space:]]' >usb.s
+arm-none-eabi-as -o usb.o -mthumb -mcpu=cortex-m3 -mimplicit-it=never -I./include -k -mapcs-reentrant -mccs -gstabs usb.s
+arm-none-eabi-ld -g -n -T rte/stm32f103.flash.ld -o test.elf rte/boot.o main.o usb.o
+rm main.s rte/boot.s usb.s
+```
 
 By default it's built for being written into the flash (`BUILD ?= flash` in `Makefile`), but if you're experimenting,
 then you can build it for booting from SRAM as well, and spare some of the lifetime of the flash.
@@ -117,7 +140,25 @@ this use case. If you hit this, just open an issue or send me a mail and I'll fi
 
 ## The scope client
 
+Prerequisites:
+* `make`: *GNU* make, `make-1:4.2.1-16.fc32.x86_64` : A GNU tool which simplifies the build process for users
+* `g++`: nothing fancy, `gcc-c++-10.0.1-0.11.fc32.x86_64` : C++ support for GCC
+* SDL: `SDL2_gfx-devel-1.0.4-1.fc32.x86_64`, `SDL2-devel-2.0.12-1.fc32.x86_64` : Cross-platform multimedia library
+* `libusb-1.0`: `libusbx-1.0.23-1.fc32.x86_64` : Library for accessing USB devices
+
 The PC client can be built in the `pc/` folder by `make`, and started by `./scope`.
+```
+~/src/scope/pc$ make clean
+rm -rf *.o scope
+
+~/src/scope/pc$ make
+g++ -c -ggdb3 -std=c++11 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libusb-1.0  scope.cc
+g++ -c -ggdb3 -std=c++11 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libusb-1.0  ProggyOpti.cc
+g++ -c -ggdb3 -std=c++11 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libusb-1.0  screen.cc
+g++ -c -ggdb3 -std=c++11 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libusb-1.0  ui.cc
+g++ -c -ggdb3 -std=c++11 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libusb-1.0  device.cc
+g++ -o scope scope.o ProggyOpti.o screen.o ui.o device.o -ggdb3 -lm -lpthread -lSDL2_gfx -lSDL2 -lusb-1.0
+```
 
 The keys:
 
